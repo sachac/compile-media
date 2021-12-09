@@ -1,0 +1,31 @@
+This repository contains a bunch of Emacs Lisp functions I use to make
+[[https://ffmpeg.org/ffmpeg.html][FFmpeg]] commands for combining videos.
+
+Probably still quite buggy.
+
+Example call from Emacs Lisp:
+
+#+begin_src emacs-lisp :eval no
+(let* ((sources
+        '((video (:source
+                  "video-a.webm"
+                  :start-ms "00:00:30.000"
+                  :stop-ms "00:00:35.000")
+                 (:source
+                  "video-b.webm"
+                  :start-ms "00:00:10.000"
+                  :stop-ms "00:00:15.000"))
+          (audio
+                 (:source
+                  "video-a.webm"
+                  :start-ms "00:00:30.000"
+                  :stop-ms "00:00:35.000")
+                 (:source
+                  "video-b.webm"
+                  :start-ms "00:00:10.000"
+                  :stop-ms "00:00:15.000")))))
+  (kill-new (compile-media-get-command sources (expand-file-name "~/test.webm"))))
+#+end_src
+
+
+Sacha ([[sacha@sachachua.com]])
