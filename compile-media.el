@@ -239,9 +239,9 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
               (delq nil
                     (list
                      (cond
-                      ((and start-ms stop-ms) (format "trim=%.3f:%.3f" start-s stop-s))
-                      (start-ms (format "trim=%.3f:" start-s))
-                      (stop-ms (format "trim=:%.3f" stop-s)))
+                      ((and start-ms stop-ms) (format "select='between(t,%.3f,%.3f)'" start-s stop-s))
+                      (start-ms (format "select='gte(t,%.3f)'" start-s))
+                      (stop-ms (format "select='lte(t,%.3f)'" stop-s)))
                      (if duration
                          (format "setpts=(PTS-STARTPTS)*%.3f"
                                  (/ duration video-duration))
@@ -323,24 +323,35 @@ The output is sent to OUTPUT-NAME. TYPE is v=1:a=0 or a=0:v=1."
               (delete-region (line-beginning-position) (line-end-position))
               (insert (substring input-string 1)))))))))
 
+(defun compile-media-split-tracks (sources)
+  "Split a list of the form ((:source ... :include '(video)) ...).
+Return a list of the form ((video (:source ...) (:source ...))
+(audio (:source ...) (:source ...))).
+If :include is not specified, include it for all the tracks."
+  (mapcar
+   (lambda (track)
+     (cons track (seq-filter (lambda (o) (or (null (plist-get o :include)) (member track (plist-get o :include)))) sources)))
+   '(video audio)))
+
 (defun compile-media (sources output-file &rest args)
+  "Combine SOURCES into OUTPUT-FILE."
   (let ((ffmpeg-args (compile-media-get-args sources output-file)))
     (with-current-buffer (get-buffer-create "*ffmpeg*")
-    (when (process-live-p compile-media--conversion-process)
-      (quit-process compile-media--conversion-process))
-    (erase-buffer)
-    (insert compile-media-ffmpeg-executable " " (mapconcat #'shell-quote-argument ffmpeg-args " ") "\n")
-    (setq compile-media--conversion-process
-          (apply 'start-process "ffmpeg" (current-buffer) compile-media-ffmpeg-executable ffmpeg-args))
-    (set-process-coding-system compile-media--conversion-process 'utf-8-dos 'utf-8-dos)
-    (set-process-filter compile-media--conversion-process 'compile-media--process-filter-function)
-    (set-process-sentinel compile-media--conversion-process
-                          (lambda (process event)
-                            ;; (when (save-match-data (string-match "finished" event))
-                            ;;   (when subtitle-file (delete-file subtitle-file)))
-                            (when (plist-get args :sentinel)
-                              (funcall (plist-get args :sentinel) process event))))
-    (display-buffer (current-buffer)))))
+      (when (process-live-p compile-media--conversion-process)
+        (quit-process compile-media--conversion-process))
+      (erase-buffer)
+      (insert compile-media-ffmpeg-executable " " (mapconcat #'shell-quote-argument ffmpeg-args " ") "\n")
+      (setq compile-media--conversion-process
+            (apply 'start-process "ffmpeg" (current-buffer) compile-media-ffmpeg-executable ffmpeg-args))
+      (set-process-coding-system compile-media--conversion-process 'utf-8-dos 'utf-8-dos)
+      (set-process-filter compile-media--conversion-process 'compile-media--process-filter-function)
+      (set-process-sentinel compile-media--conversion-process
+                            (lambda (process event)
+                              ;; (when (save-match-data (string-match "finished" event))
+                              ;;   (when subtitle-file (delete-file subtitle-file)))
+                              (when (plist-get args :sentinel)
+                                (funcall (plist-get args :sentinel) process event))))
+      (display-buffer (current-buffer)))))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
@@ -370,7 +381,7 @@ The output is sent to OUTPUT-NAME. TYPE is v=1:a=0 or a=0:v=1."
     (reverse result)))
 
 (defun compile-media--format-audio (list &optional start-input)
-  "LIST is a plist of (:start-ms ... :end-ms ... :source)
+  "LIST is a plist of (:start-ms ... :stop-ms ... :source)
 start-input should have the numerical index for the starting input file."
   (when list
     (let ((groups
@@ -380,12 +391,14 @@ start-input should have the numerical index for the starting input file."
                       :filter (format "aselect='%s',asetpts='N/SR/TB'"
                                       (mapconcat
                                        (lambda (o)
-                                         (format "between(t,%.3f,%.3f)"
-                                                 (/ (plist-get o :start-ms) 1000.0)
-                                                 (/ (plist-get o :stop-ms) 1000.0)))
+                                         (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
+                                               (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
+                                           (cond
+                                            ((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
+                                            (start-s (format "gte(t,%.3f)" start-s))
+                                            (stop-s (format "lte(t,%.3f)" stop-s)))))
                                        current
-                                       "+")
-                                      )))
+                                       "+"))))
                    (compile-media--combine-sources list))))
       (list
        :input
@@ -394,7 +407,7 @@ start-input should have the numerical index for the starting input file."
        (concat
         (string-join (seq-map-indexed
                       (lambda (o i)
-                        (format "[%d]%s[%s]"
+                        (format "[%d:a]%s[%s]"
                                 (+ (or start-input 0) i)
                                 (plist-get o :filter)
                                 (if (> (length groups) 1)
