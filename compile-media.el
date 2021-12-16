@@ -141,7 +141,17 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
              "ffprobe -select_streams v -read_intervals %.3f%%%.3f -show_entries frame=pkt_pts,pict_type -hide_banner %s -of csv=print_section=0 -v quiet | grep I | cut -d ',' -f 1"
              (/ (compile-media-string-to-msecs start-time) 1000.0)
              (/ (compile-media-string-to-msecs end-time) 1000.0)
-             (shell-quote-argument video-file))))))
+             (shell-quote-argument (expand-file-name video-file)))))))
+
+(defun compile-media-ffmpeg-get-frames-between (video-file start-time end-time)
+  (mapcar 'string-to-number
+          (split-string
+           (shell-command-to-string
+            (format
+             "ffprobe -select_streams v -read_intervals %.3f%%%.3f -show_entries frame=pkt_pts,pict_type -hide_banner %s -of csv=print_section=0 -v quiet | cut -d ',' -f 1"
+             (/ (compile-media-string-to-msecs start-time) 1000.0)
+             (/ (compile-media-string-to-msecs end-time) 1000.0)
+             (shell-quote-argument (expand-file-name video-file)))))))
 
 (defun compile-media-video-dimensions (file)
   "Return (width . height) of FILE."
@@ -459,6 +469,40 @@ start-input should have the numerical index for the starting input file."
   "Return FFmpeg command for combining SOURCES into OUTPUT-FILE."
   (concat compile-media-ffmpeg-executable " "
           (mapconcat 'shell-quote-argument (compile-media-get-args sources output-file) " ")))
+
+(defun compile-media-verify-video-keyframes (filename threshold throw-error)
+  "Check if the ending of the video at FILENAME has the keyframes we're expecting.
+THRESHOLD is the number of milliseconds to accept. Return last keyframe time if it appears valid.
+Return nil if invalid.
+If THROW-ERROR is non-nil, throw an error if invalid."
+  (interactive (list (read-file-name "File: ") 10000 t))
+  (let* ((duration (compile-media-get-file-duration-ms filename))
+         (last-frames (compile-media-ffmpeg-get-keyframes-between filename (- duration threshold) duration)))
+    (cond
+     ((and last-frames (> (car (last last-frames)) (- duration threshold)))
+      (car (last last-frames)))
+     (throw-error (error "Video %s may have encoding issues, last keyframe %f before duration %s"
+                         filename
+                         (- duration
+                            (or (car (last last-frames)) duration))
+                         duration)))))
+
+(defun compile-media-verify-video-frames (filename threshold throw-error)
+  "Check if the ending of the video at FILENAME has the frames we're expecting.
+THRESHOLD is the number of milliseconds to accept. Return last frame time if it appears valid.
+Return nil if invalid.
+If THROW-ERROR is non-nil, throw an error if invalid."
+  (interactive (list (read-file-name "File: ") 3000 t))
+  (let* ((duration (compile-media-get-file-duration-ms filename))
+         (last-frames (compile-media-ffmpeg-get-frames-between filename (- duration threshold) duration)))
+    (cond
+     ((and last-frames (> (car (last last-frames)) (- duration threshold)))
+      (car (last last-frames)))
+     (throw-error (error "Video %s may have encoding issues, last frame %f before duration %s"
+                         filename
+                         (- duration
+                            (or (car (last last-frames)) duration))
+                         duration)))))
 
 (provide 'compile-media)
 ;;; compile-media.el ends here
