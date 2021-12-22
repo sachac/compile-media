@@ -60,7 +60,7 @@ If nil, omit the description."
   :type 'integer :group 'compile-media)
 
 (defcustom compile-media-output-video-width 1280 "Video will be the specified number of pixels wide."
-   :type 'integer :group 'compile-media)
+  :type 'integer :group 'compile-media)
 (defcustom compile-media-output-video-height 720 "Video will be the specified number of pixels tall."
   :type 'integer :group 'compile-media)
 (defcustom compile-media-description-drawtext-filter-params "fontcolor=white:x=5:y=5:fontsize=40"
@@ -202,7 +202,11 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
   "Return arguments for static image in INFO."
   (list
    :input
-   (list "-loop" "1" "-t" (format "%.3f" (/ (plist-get info :duration) 1000.0)) "-i" (plist-get info :source))
+   (list "-loop" "1" "-t" (format "%.3f" (/ (or
+                                             (plist-get info :duration)
+                                             (- (plist-get info :stop-ms)
+                                                (plist-get info :start-ms)))
+                                            1000.0)) "-i" (plist-get info :source))
    :filter
    (format "[%d:v]%s[r%d];"
            (plist-get info :index)
@@ -218,7 +222,11 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
   (let ((gif-frames (compile-media-get-animated-gif-frames (plist-get info :source))))
     (list
      :input
-     (list "-r" (format "%.3f" (/ gif-frames (/ (plist-get info :duration) 1000.0))) "-i" (plist-get info :source))
+     (list "-r" (format "%.3f" (/ gif-frames (/ (or
+                                                 (plist-get info :duration)
+                                                 (- (plist-get info :stop-ms)
+                                                    (plist-get info :start-ms)))
+                                                1000.0))) "-i" (plist-get info :source))
      :filter
      ;; (format "-i %s" filename)
      (format "[%d:v]%s[r%d];"
@@ -252,10 +260,12 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
                       ((and start-ms stop-ms) (format "select='between(t,%.3f,%.3f)'" start-s stop-s))
                       (start-ms (format "select='gte(t,%.3f)'" start-s))
                       (stop-ms (format "select='lte(t,%.3f)'" stop-s)))
-                     (if duration
-                         (format "setpts=(PTS-STARTPTS)*%.3f"
-                                 (/ duration video-duration))
-                       "setpts=PTS-STARTPTS")
+                     (cond
+                      ((and (plist-get info :keep-original-duration)
+                            (<= video-duration duration))
+                       (format "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f" (/ (- duration video-duration) 1000.0)))
+                      (duration (format "setpts=(PTS-STARTPTS)*%.3f" (/ duration video-duration)))
+                      (t "setpts=PTS-STARTPTS"))
                      (plist-get info :scale-filter)
                      (plist-get info :description-filter)))
               ",")
@@ -345,14 +355,14 @@ If :include is not specified, include it for all the tracks."
 
 (defun compile-media (sources output-file &rest args)
   "Combine SOURCES into OUTPUT-FILE."
-  (let ((ffmpeg-args (compile-media-get-args sources output-file)))
+  (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
     (with-current-buffer (get-buffer-create "*ffmpeg*")
       (when (process-live-p compile-media--conversion-process)
         (quit-process compile-media--conversion-process))
       (erase-buffer)
-      (insert compile-media-ffmpeg-executable " " (mapconcat #'shell-quote-argument ffmpeg-args " ") "\n")
+      (insert ffmpeg-cmd "\n")
       (setq compile-media--conversion-process
-            (apply 'start-process "ffmpeg" (current-buffer) compile-media-ffmpeg-executable ffmpeg-args))
+            (start-process-shell-command "ffmpeg" (current-buffer) ffmpeg-cmd))
       (set-process-coding-system compile-media--conversion-process 'utf-8-dos 'utf-8-dos)
       (set-process-filter compile-media--conversion-process 'compile-media--process-filter-function)
       (set-process-sentinel compile-media--conversion-process
@@ -382,6 +392,8 @@ If :include is not specified, include it for all the tracks."
                (prog1 (or (null previous)
                           (and 
                            (string= (plist-get o :source) (plist-get previous :source))
+                           (plist-get o :start-ms)
+                           (plist-get previous :stop-ms)
                            (>= (plist-get o :start-ms) (plist-get previous :stop-ms))))
                  (setq previous o)))
              temp))
@@ -454,6 +466,9 @@ start-input should have the numerical index for the starting input file."
     (append
      (plist-get visual-args :input)
      (plist-get audio-args :input)
+     (seq-mapcat (lambda (f)
+                   (list "-i" (expand-file-name (plist-get f :source))))
+                 (assoc-default 'subtitles sources))
      (list "-filter_complex" (string-join
                               (delq nil
                                     (list
@@ -462,13 +477,32 @@ start-input should have the numerical index for the starting input file."
                               ";"))
      (plist-get visual-args :output)
      (plist-get audio-args :output)
+     (if (assoc-default 'subtitles sources)
+         (list "-map:s" (number-to-string (+
+                                           (plist-get visual-args :input-count)
+                                           (plist-get audio-args :input-count)))))
+     compile-media-ffmpeg-arguments
      (list "-y" output-file)
      nil)))
 
 (defun compile-media-get-command (sources output-file)
   "Return FFmpeg command for combining SOURCES into OUTPUT-FILE."
-  (concat compile-media-ffmpeg-executable " "
-          (mapconcat 'shell-quote-argument (compile-media-get-args sources output-file) " ")))
+  (let ((temporary-files
+         (string-join
+          (seq-mapcat
+           (lambda (track)
+             (mapcar
+              (lambda (entry) (shell-quote-argument (expand-file-name (plist-get entry :source))))
+              (seq-filter (lambda (entry) (plist-get entry :temporary))
+                          (cdr track))))
+           sources)
+          " ")))
+    (concat compile-media-ffmpeg-executable " "
+            (mapconcat 'shell-quote-argument (compile-media-get-args
+                                              sources output-file) " ")
+            (if temporary-files
+                (concat " && rm " temporary-files)
+              ""))))
 
 (defun compile-media-verify-video-keyframes (filename threshold throw-error)
   "Check if the ending of the video at FILENAME has the keyframes we're expecting.
@@ -487,13 +521,14 @@ If THROW-ERROR is non-nil, throw an error if invalid."
                             (or (car (last last-frames)) duration))
                          duration)))))
 
-(defun compile-media-verify-video-frames (filename threshold throw-error)
+(defun compile-media-verify-video-frames (filename &optional threshold throw-error)
   "Check if the ending of the video at FILENAME has the frames we're expecting.
-THRESHOLD is the number of milliseconds to accept. Return last frame time if it appears valid.
-Return nil if invalid.
+THRESHOLD is the number of milliseconds to accept, and it defaults to 3000.
+Return last frame time if it appears valid, or nil if invalid.
 If THROW-ERROR is non-nil, throw an error if invalid."
   (interactive (list (read-file-name "File: ") 3000 t))
-  (let* ((duration (compile-media-get-file-duration-ms filename))
+  (let* ((threshold (or threshold 3000))
+         (duration (compile-media-get-file-duration-ms filename))
          (last-frames (compile-media-ffmpeg-get-frames-between filename (- duration threshold) duration)))
     (cond
      ((and last-frames (> (car (last last-frames)) (- duration threshold)))
