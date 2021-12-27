@@ -294,7 +294,14 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
 
 (defun compile-media--scale-filter (o)
   "Return the complex filter for scaling O."
-  (format "scale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
+  (format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
+          (if (and (plist-get o :x1) (plist-get o :y1)
+                   (plist-get o :x2) (plist-get o :y2))
+              (format "crop=x=%d:y=%d:w=%d:h=%d,"
+                      (plist-get o :x1) (plist-get o :y1)
+                      (- (plist-get o :x2) (plist-get o :x1))
+                      (- (plist-get o :y2) (plist-get o :y1)))
+            "")
           compile-media-output-video-width
           (if (plist-get o :description)
               (- compile-media-output-video-height
@@ -500,7 +507,7 @@ start-input should have the numerical index for the starting input file."
     (concat compile-media-ffmpeg-executable " "
             (mapconcat 'shell-quote-argument (compile-media-get-args
                                               sources output-file) " ")
-            (if temporary-files
+            (if (> (length temporary-files) 0)
                 (concat " && rm " temporary-files)
               ""))))
 
