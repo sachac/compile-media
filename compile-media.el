@@ -206,7 +206,7 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
                                              (plist-get info :duration)
                                              (- (plist-get info :stop-ms)
                                                 (plist-get info :start-ms)))
-                                            1000.0)) "-i" (plist-get info :source))
+                                            1000.0)) "-i" (expand-file-name (plist-get info :source)))
    :filter
    (format "[%d:v]%s[r%d];"
            (plist-get info :index)
@@ -219,14 +219,16 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
 
 (defun compile-media--prepare-animated-gif (info)
   "Return arguments for animated gif specified in INFO."
-  (let ((gif-frames (compile-media-get-animated-gif-frames (plist-get info :source))))
+  (let ((gif-frames (compile-media-get-animated-gif-frames
+                     (expand-file-name (plist-get info :source)))))
     (list
      :input
      (list "-r" (format "%.3f" (/ gif-frames (/ (or
                                                  (plist-get info :duration)
                                                  (- (plist-get info :stop-ms)
                                                     (plist-get info :start-ms)))
-                                                1000.0))) "-i" (plist-get info :source))
+                                                1000.0))) "-i" (expand-file-name
+                                                                (plist-get info :source)))
      :filter
      ;; (format "-i %s" filename)
      (format "[%d:v]%s[r%d];"
@@ -250,7 +252,8 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
           (stop-s (and stop-ms (/ stop-ms 1000.0)))
           (duration (plist-get info :duration))
           (video-duration (if duration (or (plist-get info :video-duration)
-                                           (compile-media-get-file-duration-ms (plist-get info :source))))))
+                                           (compile-media-get-file-duration-ms
+                                            (expand-file-name (plist-get info :source)))))))
      (format "[%d:v]%s[r%d];"
              (plist-get info :index)
              (string-join
@@ -452,7 +455,7 @@ start-input should have the numerical index for the starting input file."
           ""))
        :input-count (length groups)
        :output
-       (list "-map:a" "[a]" "-acodec" "libvorbis")))))
+       (list "-map:a" "[a]")))))
 
 (defun compile-media--convert-timestamps (list)
   "Convert the timestamps in LIST."
@@ -489,7 +492,7 @@ start-input should have the numerical index for the starting input file."
                                            (plist-get visual-args :input-count)
                                            (plist-get audio-args :input-count)))))
      compile-media-ffmpeg-arguments
-     (list "-y" output-file)
+     (list "-y" (expand-file-name output-file))
      nil)))
 
 (defun compile-media-get-command (sources output-file)
