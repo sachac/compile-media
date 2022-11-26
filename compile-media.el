@@ -489,8 +489,8 @@ start-input should have the numerical index for the starting input file."
      (plist-get audio-args :output)
      (if (assoc-default 'subtitles sources)
          (list "-map:s" (number-to-string (+
-                                           (plist-get visual-args :input-count)
-                                           (plist-get audio-args :input-count)))))
+                                           (or (plist-get visual-args :input-count) 0)
+                                           (or (plist-get audio-args :input-count) 0)))))
      compile-media-ffmpeg-arguments
      (list "-y" (expand-file-name output-file))
      nil)))
