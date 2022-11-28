@@ -32,7 +32,7 @@
 ;; plist keys:
 ;; :source - filename of a video, animated GIF, or static image
 ;; :start-ms - start time in milliseconds, if clipping
-;; :stop-ms - end time in milliseconds, if clipping 
+;; :stop-ms - end time in milliseconds, if clipping
 ;; :duration-ms - speed up or slow down the video to fit in this duration, if specified
 ;; :description - text to put at the top
 ;;; Code:
@@ -55,7 +55,8 @@
   :type 'integer
   :group 'compile-media)
 
-(defcustom compile-media-description-height 50 "Number of pixels for top description in video.
+(defcustom compile-media-description-height 50
+  "Number of pixels for top description in video.
 If nil, omit the description."
   :type 'integer :group 'compile-media)
 
@@ -77,7 +78,9 @@ Return nil if TIME-STRING doesn't match the pattern."
         (let ((hours (string-to-number (or (match-string 2 time-string) "0")))
               (mins  (string-to-number (match-string 3 time-string)))
               (secs  (string-to-number (match-string 4 time-string)))
-              (msecs (string-to-number (s-pad-right 3 "0" (match-string 5 time-string)))))
+              (msecs (string-to-number (string-pad
+                                        (match-string 5 time-string)
+                                        3 ?0))))
           (+ (* (truncate hours) 3600000)
              (* (truncate mins) 60000)
              (* (truncate secs) 1000)
@@ -89,7 +92,7 @@ Return nil if TIME-STRING doesn't match the pattern."
           "." (format "%03d" (mod msecs 1000))))
 
 (defun compile-media-string-to-msecs (s)
-  "Convert a string to milliseconds.
+  "Convert S to milliseconds.
 Accepts a timestamp or a number.  If the number has a decimal
 point, consider it as the number of seconds instead of milliseconds."
   (cond
@@ -122,11 +125,11 @@ Returns milliseconds."
      ((eq direction '>) (seq-find (lambda (o) (> o msecs)) frames))
      ((eq direction '<=) (seq-find (lambda (o) (<= o msecs)) (reverse frames)))
      ((eq direction '<) (seq-find (lambda (o) (< o msecs)) (reverse frames)))
-     (t (error "Direction needed.")))))
+     (t (error "Direction needed")))))
 
 (defun compile-media-ffmpeg-get-keyframes-around (video-file msecs &optional ms-buffer)
-  "Return a list of milliseconds for VIDEO-FILE keyframes around TIME.
-If non-nil, check MS-BUFFER milliseconds around TIME."
+  "Return a list of milliseconds for VIDEO-FILE keyframes around MSECS.
+If non-nil, check MS-BUFFER milliseconds around MSECS."
   (setq msecs (compile-media-string-to-msecs msecs))
   (compile-media-ffmpeg-get-keyframes-between
    video-file
@@ -134,6 +137,7 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
    (+ msecs (or ms-buffer compile-media-ffmpeg-keyframe-buffer))))
 
 (defun compile-media-ffmpeg-get-keyframes-between (video-file start-time end-time)
+  "Return VIDEO-FILE keyframes between START-TIME and END-TIME."
   (mapcar 'string-to-number
           (split-string
            (shell-command-to-string
@@ -144,6 +148,7 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
              (shell-quote-argument (expand-file-name video-file)))))))
 
 (defun compile-media-ffmpeg-get-frames-between (video-file start-time end-time)
+  "Return VIDEO-FILE frames between START-TIME and END-TIME."
   (mapcar 'string-to-number
           (split-string
            (shell-command-to-string
@@ -166,20 +171,21 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
     (cons (car result) (cadr result))))
 
 (defun compile-media--description-filter (o)
-  "Return the FFmpeg filter needed to add DESCRIPTION as text."
+  "Return the FFmpeg filter needed to add O's :description."
   (when (plist-get o :description)
     (concat "drawtext=" compile-media-description-drawtext-filter-params ":text='"
-            (plist-get o :description) 
+            (plist-get o :description)
             "'")))
 
 (defun compile-media--format-visuals (visuals)
+  "Determine the arguments for VISUALS."
   (when visuals
     (let* (info filter input)
       (setq info
             (seq-map-indexed
              (lambda (o i)
                (let* ((source (plist-get o :source)))
-                 (funcall 
+                 (funcall
                   (cond
                    ((string-match "mp4\\|webm\\|mkv" source) 'compile-media--prepare-video)
                    ((string-match "gif$" source) 'compile-media--prepare-animated-gif)
@@ -241,7 +247,7 @@ If non-nil, check MS-BUFFER milliseconds around TIME."
              (plist-get info :index)))))
 
 (defun compile-media--prepare-video (info)
-  "Return ffmpeg arguments for videos."
+  "Return ffmpeg arguments for videos specified by INFO."
   (list
    :input
    (list "-i" (shell-quote-argument (expand-file-name (plist-get info :source))))
@@ -341,7 +347,7 @@ The output is sent to OUTPUT-NAME. TYPE is v=1:a=0 or a=0:v=1."
 
 ;;https://emacs.stackexchange.com/questions/48256/how-to-have-a-buffer-interpret-c-m-as-an-actual-carriage-return
 (defun compile-media--process-filter-function (proc input-string)
-  "Handle ^M for progress reporting."
+  "Handle ^M for progress reporting for PROC given INPUT-STRING."
   (let ((proc-buf (process-buffer proc)))
     (when (buffer-live-p proc-buf)
       (with-current-buffer proc-buf
@@ -354,9 +360,9 @@ The output is sent to OUTPUT-NAME. TYPE is v=1:a=0 or a=0:v=1."
               (insert (substring input-string 1)))))))))
 
 (defun compile-media-split-tracks (sources)
-  "Split a list of the form ((:source ... :include '(video)) ...).
+  "Split SOURCES, a list of the form ((:source ... :include '(video)) ...).
 Return a list of the form ((video (:source ...) (:source ...))
-(audio (:source ...) (:source ...))).
+\(audio (:source ...) (:source ...))).
 If :include is not specified, include it for all the tracks."
   (mapcar
    (lambda (track)
@@ -364,7 +370,7 @@ If :include is not specified, include it for all the tracks."
    '(video audio)))
 
 (defun compile-media (sources output-file &rest args)
-  "Combine SOURCES into OUTPUT-FILE."
+  "Combine SOURCES into OUTPUT-FILE. Pass ARGS."
   (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
     (with-current-buffer (get-buffer-create "*ffmpeg*")
       (when (process-live-p compile-media--conversion-process)
@@ -394,13 +400,14 @@ If :include is not specified, include it for all the tracks."
    "+"))
 
 (defun compile-media--combine-sources (list)
+  "Combine sources in LIST."
   (let ((temp list) current previous result)
     (while temp
       (setq current
             (seq-take-while
              (lambda (o)
                (prog1 (or (null previous)
-                          (and 
+                          (and
                            (string= (plist-get o :source) (plist-get previous :source))
                            (plist-get o :start-ms)
                            (plist-get previous :stop-ms)
@@ -413,8 +420,9 @@ If :include is not specified, include it for all the tracks."
     (reverse result)))
 
 (defun compile-media--format-audio (list &optional start-input)
-  "LIST is a plist of (:start-ms ... :stop-ms ... :source)
-start-input should have the numerical index for the starting input file."
+  "Determine arguments for audio in LIST.
+LIST is a plist of (:start-ms ... :stop-ms ... :source)
+START-INPUT should have the numerical index for the starting input file."
   (when list
     (let ((groups
            (mapcar (lambda (current)
@@ -515,9 +523,10 @@ start-input should have the numerical index for the starting input file."
               ""))))
 
 (defun compile-media-verify-video-keyframes (filename threshold throw-error)
-  "Check if the ending of the video at FILENAME has the keyframes we're expecting.
-THRESHOLD is the number of milliseconds to accept. Return last keyframe time if it appears valid.
-Return nil if invalid.
+  "Check FILENAME for premature ending.
+Check if the ending of the video at FILENAME has the keyframes we're expecting.
+THRESHOLD is the number of milliseconds to accept.
+Return last keyframe time if it appears valid. Return nil if invalid.
 If THROW-ERROR is non-nil, throw an error if invalid."
   (interactive (list (read-file-name "File: ") 10000 t))
   (let* ((duration (compile-media-get-file-duration-ms filename))
