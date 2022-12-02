@@ -372,7 +372,7 @@ If :include is not specified, include it for all the tracks."
 (defun compile-media (sources output-file &rest args)
   "Combine SOURCES into OUTPUT-FILE. Pass ARGS."
   (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
-    (with-current-buffer (get-buffer-create "*ffmpeg*")
+    (with-current-buffer (get-buffer-create (format "*ffmpeg-%s*" output-file))
       (when (process-live-p compile-media--conversion-process)
         (quit-process compile-media--conversion-process))
       (erase-buffer)
@@ -487,12 +487,16 @@ START-INPUT should have the numerical index for the starting input file."
      (seq-mapcat (lambda (f)
                    (list "-i" (expand-file-name (plist-get f :source))))
                  (assoc-default 'subtitles sources))
-     (list "-filter_complex" (string-join
-                              (delq nil
-                                    (list
-                                     (plist-get visual-args :filter)
-                                     (plist-get audio-args :filter)))
-                              ";"))
+		 (when (delq nil
+                 (list
+                  (plist-get visual-args :filter)
+                  (plist-get audio-args :filter)))
+			 (list "-filter_complex" (string-join
+																(delq nil
+																			(list
+																			 (plist-get visual-args :filter)
+																			 (plist-get audio-args :filter)))
+																";")))
      (plist-get visual-args :output)
      (plist-get audio-args :output)
      (if (assoc-default 'subtitles sources)
