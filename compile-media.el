@@ -385,9 +385,27 @@ If :include is not specified, include it for all the tracks."
                             (lambda (process event)
                               ;; (when (save-match-data (string-match "finished" event))
                               ;;   (when subtitle-file (delete-file subtitle-file)))
+															(shell-command (format "ffmpeg -y -i %s %s.vtt"
+																										 output-file
+																										 (file-name-sans-extension output-file)))
                               (when (plist-get args :sentinel)
                                 (funcall (plist-get args :sentinel) process event))))
       (display-buffer (current-buffer)))))
+
+(defun compile-media-sync (sources output-file &rest args)
+  "Combine SOURCES into OUTPUT-FILE. Pass ARGS."
+  (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
+    (with-current-buffer (get-buffer-create (format "*ffmpeg-%s*" output-file))
+      (erase-buffer)
+      (insert ffmpeg-cmd "\n")
+      (shell-command ffmpeg-cmd (current-buffer))
+			(when (assoc-default 'subtitles sources)
+				(shell-command (format "ffmpeg -y -i %s %s.vtt"
+															 output-file
+															 (file-name-sans-extension output-file))
+											 (current-buffer)))
+			(when (plist-get args :sentinel)
+        (funcall (plist-get args :sentinel) nil "finished")))))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
