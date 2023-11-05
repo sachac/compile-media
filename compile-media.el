@@ -46,7 +46,7 @@
   :group 'compile-media
   :type 'string)
 
-(defcustom compile-media-ffmpeg-arguments '("-c:v" "vp8" "-vsync" "2" "-b:v" "800k")
+(defcustom compile-media-ffmpeg-arguments '("-c:v" "vp8" "-vsync" "2" "-b:v" "800k" "-auto-alt-ref" "0")
   "Extra arguments to pass to FFmpeg."
   :type '(repeat string)
   :group 'compile-media)
