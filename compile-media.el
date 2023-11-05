@@ -303,23 +303,28 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
 
 (defun compile-media--scale-filter (o)
   "Return the complex filter for scaling O."
-  (format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
-          (if (and (plist-get o :x1) (plist-get o :y1)
-                   (plist-get o :x2) (plist-get o :y2))
-              (format "crop=x=%d:y=%d:w=%d:h=%d,"
-                      (plist-get o :x1) (plist-get o :y1)
-                      (- (plist-get o :x2) (plist-get o :x1))
-                      (- (plist-get o :y2) (plist-get o :y1)))
-            "")
-          compile-media-output-video-width
-          (if (plist-get o :description)
-              (- compile-media-output-video-height
-                 (or compile-media-description-height 0))
-            compile-media-output-video-height)
-          compile-media-output-video-width
-          compile-media-output-video-height
-          (or (and (plist-get o :description) compile-media-description-height) 0)
-          (or (and (plist-get o :description) compile-media-description-height) 0)))
+	(let ((size (compile-media-video-dimensions (plist-get o :source))))
+		;; TODO: handle x1, y1, x2, y2, description
+		(if	(and (= (car size) compile-media-output-video-width)
+						 (= (cdr size) compile-media-output-video-height))
+				"scale"
+			(format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
+							(if (and (plist-get o :x1) (plist-get o :y1)
+											 (plist-get o :x2) (plist-get o :y2))
+									(format "crop=x=%d:y=%d:w=%d:h=%d,"
+													(plist-get o :x1) (plist-get o :y1)
+													(- (plist-get o :x2) (plist-get o :x1))
+													(- (plist-get o :y2) (plist-get o :y1)))
+								"")
+							compile-media-output-video-width
+							(if (plist-get o :description)
+									(- compile-media-output-video-height
+										 (or compile-media-description-height 0))
+								compile-media-output-video-height)
+							compile-media-output-video-width
+							compile-media-output-video-height
+							(or (and (plist-get o :description) compile-media-description-height) 0)
+							(or (and (plist-get o :description) compile-media-description-height) 0)))))
 
 ;; (defun compile-media-ffmpeg-input (file start-ms stop-ms &optional frame-before)
 ;;   "Return the input arguments for FILE from START-MS to STOP-MS.
