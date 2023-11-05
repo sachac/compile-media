@@ -145,7 +145,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
              "ffprobe -select_streams v -read_intervals %.3f%%%.3f -show_entries frame=pkt_pts,pict_type -hide_banner %s -of csv=print_section=0 -v quiet | grep I | cut -d ',' -f 1"
              (/ (compile-media-string-to-msecs start-time) 1000.0)
              (/ (compile-media-string-to-msecs end-time) 1000.0)
-             (shell-quote-argument (expand-file-name video-file)))))))
+             (shell-quote-argument video-file))))))
 
 (defun compile-media-ffmpeg-get-frames-between (video-file start-time end-time)
   "Return VIDEO-FILE frames between START-TIME and END-TIME."
@@ -156,7 +156,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
              "ffprobe -select_streams v -read_intervals %.3f%%%.3f -show_entries frame=pkt_pts,pict_type -hide_banner %s -of csv=print_section=0 -v quiet | cut -d ',' -f 1"
              (/ (compile-media-string-to-msecs start-time) 1000.0)
              (/ (compile-media-string-to-msecs end-time) 1000.0)
-             (shell-quote-argument (expand-file-name video-file)))))))
+             (shell-quote-argument video-file))))))
 
 (defun compile-media-video-dimensions (file)
   "Return (width . height) of FILE."
@@ -166,7 +166,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
                   (shell-command-to-string
                    (concat
                     "ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "
-                    (shell-quote-argument (expand-file-name file))))
+                    (shell-quote-argument file)))
                   ","))))
     (cons (car result) (cadr result))))
 
@@ -212,7 +212,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
                                              (plist-get info :duration)
                                              (- (plist-get info :stop-ms)
                                                 (plist-get info :start-ms)))
-                                            1000.0)) "-i" (expand-file-name (plist-get info :source)))
+                                            1000.0)) "-i" (plist-get info :source))
    :filter
    (format "[%d:v]%s[r%d];"
            (plist-get info :index)
@@ -226,15 +226,15 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
 (defun compile-media--prepare-animated-gif (info)
   "Return arguments for animated gif specified in INFO."
   (let ((gif-frames (compile-media-get-animated-gif-frames
-                     (expand-file-name (plist-get info :source)))))
+                     (plist-get info :source))))
     (list
      :input
      (list "-r" (format "%.3f" (/ gif-frames (/ (or
                                                  (plist-get info :duration)
                                                  (- (plist-get info :stop-ms)
                                                     (plist-get info :start-ms)))
-                                                1000.0))) "-i" (expand-file-name
-                                                                (plist-get info :source)))
+                                                1000.0))) "-i"
+																								(plist-get info :source))
      :filter
      ;; (format "-i %s" filename)
      (format "[%d:v]%s[r%d];"
@@ -250,7 +250,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   "Return ffmpeg arguments for videos specified by INFO."
   (list
    :input
-   (list "-i" (shell-quote-argument (expand-file-name (plist-get info :source))))
+   (list "-i" (shell-quote-argument (plist-get info :source)))
    :filter
    (let* ((start-ms (plist-get info :start-ms))
           (stop-ms (plist-get info :stop-ms))
@@ -259,7 +259,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
           (duration (plist-get info :duration))
           (video-duration (if duration (or (plist-get info :video-duration)
                                            (compile-media-get-file-duration-ms
-                                            (expand-file-name (plist-get info :source)))))))
+                                            (plist-get info :source))))))
      (format "[%d:v]%s[r%d];"
              (plist-get info :index)
              (string-join
@@ -285,7 +285,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   (string-to-number
    (shell-command-to-string
     (concat "ffprobe -v error -select_streams v:0 -count_packets -show_entries stream=nb_read_packets -of csv=p=0 "
-            (shell-quote-argument (expand-file-name filename))))))
+            (shell-quote-argument filename)))))
 
 (defun compile-media-get-file-duration-ms (filename)
   "Return the duration of FILENAME in milliseconds."
@@ -293,7 +293,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
      (string-to-number
       (shell-command-to-string
        (concat "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "
-               (shell-quote-argument (expand-file-name filename)))))))
+               (shell-quote-argument filename))))))
 
 (defun compile-media-max-dimensions (&rest files)
   "Return the maximum dimensions for FILES."
@@ -427,7 +427,7 @@ START-INPUT should have the numerical index for the starting input file."
     (let ((groups
            (mapcar (lambda (current)
                      (list
-                      :input (list "-i" (expand-file-name (plist-get (car current) :source)))
+                      :input (list "-i" (plist-get (car current) :source))
                       :filter (format "aselect='%s',asetpts='N/SR/TB'"
                                       (mapconcat
                                        (lambda (o)
@@ -484,9 +484,10 @@ START-INPUT should have the numerical index for the starting input file."
     (append
      (plist-get visual-args :input)
      (plist-get audio-args :input)
-     (seq-mapcat (lambda (f)
-                   (list "-i" (expand-file-name (plist-get f :source))))
-                 (assoc-default 'subtitles sources))
+     (when (and (assoc-default 'subtitles sources) (string-match "webm$" output-file))
+			 (seq-mapcat (lambda (f)
+										 (list "-i" (plist-get f :source)))
+									 (assoc-default 'subtitles sources)))
 		 (when (delq nil
                  (list
                   (plist-get visual-args :filter)
@@ -504,7 +505,8 @@ START-INPUT should have the numerical index for the starting input file."
                                            (or (plist-get visual-args :input-count) 0)
                                            (or (plist-get audio-args :input-count) 0)))))
      compile-media-ffmpeg-arguments
-     (list "-y" (expand-file-name output-file))
+     (list "-y"
+					 output-file)
      nil)))
 
 (defun compile-media-get-command (sources output-file)
@@ -514,7 +516,7 @@ START-INPUT should have the numerical index for the starting input file."
           (seq-mapcat
            (lambda (track)
              (mapcar
-              (lambda (entry) (shell-quote-argument (expand-file-name (plist-get entry :source))))
+              (lambda (entry) (shell-quote-argument (plist-get entry :source)))
               (seq-filter (lambda (entry) (plist-get entry :temporary))
                           (cdr track))))
            sources)
