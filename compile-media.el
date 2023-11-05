@@ -500,10 +500,10 @@ START-INPUT should have the numerical index for the starting input file."
 																";")))
      (plist-get visual-args :output)
      (plist-get audio-args :output)
-     (if (assoc-default 'subtitles sources)
-         (list "-map:s" (number-to-string (+
-                                           (or (plist-get visual-args :input-count) 0)
-                                           (or (plist-get audio-args :input-count) 0)))))
+     (when (and (assoc-default 'subtitles sources) (string-match "webm$" output-file))
+       (list "-map:s" (number-to-string (+
+                                         (or (plist-get visual-args :input-count) 0)
+                                         (or (plist-get audio-args :input-count) 0)))))
      compile-media-ffmpeg-arguments
      (list "-y"
 					 output-file)
