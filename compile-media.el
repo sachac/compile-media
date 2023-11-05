@@ -305,8 +305,8 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   "Return the complex filter for scaling O."
 	(let ((size (compile-media-video-dimensions (plist-get o :source))))
 		;; TODO: handle x1, y1, x2, y2, description
-		(if	(and (= (car size) compile-media-output-video-width)
-						 (= (cdr size) compile-media-output-video-height))
+		(if	(and (or (null compile-media-output-video-width) (= (car size) compile-media-output-video-width))
+						 (or (null compile-media-output-video-height) (= (cdr size) compile-media-output-video-height)))
 				"scale"
 			(format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
 							(if (and (plist-get o :x1) (plist-get o :y1)
