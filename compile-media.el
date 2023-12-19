@@ -55,7 +55,7 @@
   :type 'integer
   :group 'compile-media)
 
-(defcustom compile-media-description-height 50
+(defcustom compile-media-description-height 70
   "Number of pixels for top description in video.
 If nil, omit the description."
   :type 'integer :group 'compile-media)
@@ -74,12 +74,13 @@ If nil, omit the description."
 Return nil if TIME-STRING doesn't match the pattern."
   (if (numberp time-string) (* time-string 1000.0)
     (save-match-data
-      (when (string-match "\\(\\([0-9]+\\):\\)?\\([0-9]+\\):\\([0-9]+\\)\\.\\([0-9]+\\)" time-string)
+      (when (string-match "\\(\\([0-9]+\\):\\)?\\([0-9]+\\):\\([0-9]+\\)\\(?:\\.\\([0-9]+\\)\\)?"
+													time-string)
         (let ((hours (string-to-number (or (match-string 2 time-string) "0")))
               (mins  (string-to-number (match-string 3 time-string)))
               (secs  (string-to-number (match-string 4 time-string)))
               (msecs (string-to-number (string-pad
-                                        (match-string 5 time-string)
+                                        (or (match-string 5 time-string) "0")
                                         3 ?0))))
           (+ (* (truncate hours) 3600000)
              (* (truncate mins) 60000)
@@ -174,7 +175,9 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   "Return the FFmpeg filter needed to add O's :description."
   (when (plist-get o :description)
     (concat "drawtext=" compile-media-description-drawtext-filter-params ":text='"
-            (plist-get o :description)
+						(replace-regexp-in-string
+						 ":" "\\\\:"
+						 (replace-regexp-in-string "/" "\\\\/" (plist-get o :description)))
             "'")))
 
 (defun compile-media--format-visuals (visuals)
@@ -220,7 +223,8 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
               (delq nil
                     (list
                      (plist-get info :scale-filter)
-                     (plist-get info :description-filter))))
+                     (plist-get info :description-filter)))
+							",")
            (plist-get info :index))))
 
 (defun compile-media--prepare-animated-gif (info)
@@ -243,7 +247,8 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
               (delq nil
                     (list
                      (plist-get info :scale-filter)
-                     (plist-get info :description-filter))))
+                     (plist-get info :description-filter)))
+							",")
              (plist-get info :index)))))
 
 (defun compile-media--prepare-video (info)
@@ -305,8 +310,10 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   "Return the complex filter for scaling O."
 	(let ((size (compile-media-video-dimensions (plist-get o :source))))
 		;; TODO: handle x1, y1, x2, y2, description
-		(if	(and (or (null compile-media-output-video-width) (= (car size) compile-media-output-video-width))
-						 (or (null compile-media-output-video-height) (= (cdr size) compile-media-output-video-height)))
+		(if	(and
+				 (null (plist-get o :description))
+				 (or (null compile-media-output-video-width) (= (car size) compile-media-output-video-width))
+				 (or (null compile-media-output-video-height) (= (cdr size) compile-media-output-video-height)))
 				"scale"
 			(format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
 							(if (and (plist-get o :x1) (plist-get o :y1)
@@ -410,7 +417,8 @@ If :include is not specified, include it for all the tracks."
 															 (file-name-sans-extension output-file))
 											 (current-buffer)))
 			(when (plist-get args :sentinel)
-        (funcall (plist-get args :sentinel) nil "finished")))))
+        (funcall (plist-get args :sentinel) nil "finished"))
+			(display-buffer (current-buffer)))))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
@@ -524,9 +532,11 @@ START-INPUT should have the numerical index for the starting input file."
      (plist-get visual-args :output)
      (plist-get audio-args :output)
      (when (and (assoc-default 'subtitles sources) (string-match "webm$" output-file))
-       (list "-map:s" (number-to-string (+
-                                         (or (plist-get visual-args :input-count) 0)
-                                         (or (plist-get audio-args :input-count) 0)))))
+       (list "-map:s"
+						 (concat (number-to-string (+
+																				(or (plist-get visual-args :input-count) 0)
+																				(or (plist-get audio-args :input-count) 0)))
+										 "?")))
      compile-media-ffmpeg-arguments
      (list "-y"
 					 output-file)
