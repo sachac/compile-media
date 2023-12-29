@@ -286,8 +286,8 @@ Returns a plist with :input, :filter, and :output.
 								filter-list (list (plist-get (compile-media--format-text-track text-track "v") :filter)))
 				(push (concat "[v-video]" (plist-get (compile-media--format-text-track text-track "v") :filter)) filter-list)))
 		(list :input input-list
-					:filter (string-join (reverse filter-list) ";")
-					:output (list "-map:v" (concat "[" output "]"))
+					:filter (when filter-list (string-join (reverse filter-list) ";"))
+					:output (when (or input-list filter-list) (list "-map:v" (concat "[" output "]")))
 					:input-count input-count)))
 
 (defun compile-media--prepare-static-image (info &optional output)
