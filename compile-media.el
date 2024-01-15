@@ -509,9 +509,10 @@ If :include is not specified, include it for all the tracks."
                             (lambda (process event)
                               ;; (when (save-match-data (string-match "finished" event))
                               ;;   (when subtitle-file (delete-file subtitle-file)))
-															(shell-command (format "ffmpeg -y -i %s %s.vtt"
-																										 output-file
-																										 (file-name-sans-extension output-file)))
+															(when (assoc-default 'subtitles sources)
+																(shell-command (format "ffmpeg -y -i %s %s.vtt"
+																											 output-file
+																											 (file-name-sans-extension output-file))))
                               (when (plist-get args :sentinel)
                                 (funcall (plist-get args :sentinel) process event))))
       (display-buffer (current-buffer)))))
