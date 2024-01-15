@@ -289,11 +289,15 @@ Returns a plist with :input, :filter, and :output.
   "Return arguments for static image in INFO."
   (list
    :input
-   (list "-loop" "1" "-t" (format "%.3f" (/ (or
-                                             (plist-get info :duration)
-                                             (- (plist-get info :stop-ms)
-                                                (plist-get info :start-ms)))
-                                            1000.0)) "-i" (plist-get info :source))
+   (append (list "-loop" "1" "-t" (format "%.3f" (/ (or
+																										 (plist-get info :duration-ms)
+																										 (plist-get info :duration)
+																										 (- (plist-get info :stop-ms)
+																												(plist-get info :start-ms)))
+																										1000.0)))
+					 (plist-get info :before-input)
+					 (list "-i" (plist-get info :source))
+					 (plist-get info :after-input))
    :filter
    (format "[%d:v]%s[%s]"
            (plist-get info :index)
