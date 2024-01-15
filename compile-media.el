@@ -177,17 +177,12 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   (when (or (plist-get o :description) (plist-get o :text))
     (concat "drawtext=" compile-media-description-drawtext-filter-params ":text="
 						(replace-regexp-in-string
-						 ","
-						 "\\\\,"
+						 "[\]\[,:/!]"
+						 "\\\\\\&"
 						 (replace-regexp-in-string
-							":" "\\\\:"
-							(replace-regexp-in-string
-							 "/"
-							 "\\\\/"
-							 (replace-regexp-in-string
-								"'"
-								(concat (make-string 28 ?\\) "'")
-								(or (plist-get o :description) (plist-get o :text))))))
+							"'"
+							(concat (make-string 28 ?\\) "'")
+							(or (plist-get o :description) (plist-get o :text))))
 						(if (compile-media--between o)
 								(format ":enable='%s'"
 												(compile-media--between o))
