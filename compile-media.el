@@ -312,6 +312,7 @@ Returns a plist with :input, :filter, and :output.
     (list
      :input
      (list "-r" (format "%.3f" (/ gif-frames (/ (or
+                                                 (plist-get info :duration-ms)
                                                  (plist-get info :duration)
                                                  (- (plist-get info :stop-ms)
                                                     (plist-get info :start-ms)))
@@ -346,7 +347,7 @@ Returns a plist with :input, :filter, and :output.
           (stop-ms (plist-get info :stop-ms))
           (start-s (and start-ms (/ start-ms 1000.0)))
           (stop-s (and stop-ms (/ stop-ms 1000.0)))
-          (duration (plist-get info :duration))
+          (duration (or (plist-get info :duration-ms) (plist-get info :duration)))
           (video-duration (if duration (or (plist-get info :video-duration)
                                            (compile-media-get-file-duration-ms
                                             (plist-get info :source))))))
@@ -613,7 +614,7 @@ START-INPUT should have the numerical index for the starting input file."
           (mapc (lambda (key)
                   (when (stringp (plist-get o key))
                     (setf (plist-get o key) (compile-media-string-to-msecs (plist-get o key)))))
-                '(:start-ms :stop-ms :duration)))
+                '(:start-ms :stop-ms :duration-ms :duration)))
         list))
 
 (defun compile-media-get-args (sources output-file)
