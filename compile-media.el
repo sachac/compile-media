@@ -494,7 +494,16 @@ If :include is not specified, include it for all the tracks."
    '(video audio)))
 
 (defun compile-media (sources output-file &rest args)
-  "Combine SOURCES into OUTPUT-FILE. Pass ARGS."
+  "Combine SOURCES into OUTPUT-FILE. Pass ARGS to ffmpeg.
+SOURCES should be a list of the form
+((video (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts))
+ (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
+ (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts))
+ (subtitles (:source filename)))
+"
   (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
     (with-current-buffer (get-buffer-create (format "*ffmpeg-%s*" output-file))
       (when (process-live-p compile-media--conversion-process)
