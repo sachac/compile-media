@@ -444,14 +444,8 @@ Returns a plist with :input, :filter, and :output.
 											((plist-get info :same-edits)
 											 (format "select='%s',setpts='N/FRAME_RATE/TB'"
                                       (mapconcat
-                                       (lambda (o)
-                                         (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
-                                               (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
-                                           (cond
-                                            ((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
-                                            (start-s (format "gte(t,%.3f)" start-s))
-                                            (stop-s (format "lte(t,%.3f)" stop-s)))))
-                                       (plist-get info :same-edits)
+                                       #'compile-media--select-spans
+                                       (compile-media--combine-times (plist-get info :same-edits))
                                        "+")))
 											((and start-ms stop-ms) (format "select='between(t,%.3f,%.3f)'" start-s stop-s))
 											(start-ms (format "select='gte(t,%.3f)'" start-s))
@@ -659,6 +653,30 @@ SOURCES should be a list of the form
    current
    "+"))
 
+(defun compile-media--handle-padding (list)
+	"Add entries for silence-padding."
+	(reverse
+	 (seq-reduce
+		(lambda (prev val)
+			;; :pad-left
+			(when (plist-get val :pad-left)
+				(setq prev (cons
+										(list :source 'silence
+													:duration-ms (plist-get val :pad-left))
+										prev))
+				(plist-put val :pad-left nil))
+			;; current
+			(setq prev (cons val prev))
+			;; :pad-right
+			(when (plist-get val :pad-right)
+				(setq prev (cons
+										(list :source 'silence
+													:duration-ms (plist-get val :pad-right))
+										prev))
+				(plist-put (car prev) :pad-right nil))
+			prev)
+		list nil)))
+
 (defun compile-media--combine-sources (list)
   "Combine sources in LIST."
   (let ((temp list) current previous result)
@@ -668,6 +686,9 @@ SOURCES should be a list of the form
              (lambda (o)
                (prog1 (or (null previous)
                           (and
+													 ;; same source, monotonically increasing in time
+													 (stringp (plist-get o :source))
+													 (stringp (plist-get previous :source))
                            (string= (plist-get o :source) (plist-get previous :source))
                            (plist-get o :start-ms)
                            (plist-get previous :stop-ms)
@@ -679,27 +700,57 @@ SOURCES should be a list of the form
       (setq result (cons current result)))
     (reverse result)))
 
+(defun compile-media--combine-times (list)
+	"Combine :start-ms and :stop-ms that are only 1 ms apart."
+	(mapcar
+	 (lambda (entry)
+		 (reverse
+			(seq-reduce
+			 (lambda (prev val)
+				 (cond
+					((null prev) (list val))
+					((and
+						(plist-get val :start-ms)
+						(plist-get (car prev) :stop-ms)
+						(= (plist-get val :start-ms)
+							 (1+ (plist-get (car prev) :stop-ms))))
+					 (plist-put (car prev) :stop-ms (plist-get val :stop-ms))
+					 prev)
+					(t
+					 (cons val prev))))
+			 (cdr entry)
+			 (list (car entry)))))
+	 list))
+
 (defun compile-media--format-audio (list &optional start-input)
   "Determine arguments for audio in LIST.
 LIST is a plist of (:start-ms ... :stop-ms ... :source)
 START-INPUT should have the numerical index for the starting input file."
   (when list
-    (let ((groups
+    (let ((silence-counter 0)
+					(groups
            (mapcar (lambda (current)
-                     (list
-                      :input (list "-i" (plist-get (car current) :source))
-                      :filter (format "aselect='%s',asetpts='N/SR/TB'"
-                                      (mapconcat
-                                       (lambda (o)
-                                         (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
-                                               (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
-                                           (cond
-                                            ((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
-                                            (start-s (format "gte(t,%.3f)" start-s))
-                                            (stop-s (format "lte(t,%.3f)" stop-s)))))
-                                       current
-                                       "+"))))
-                   (compile-media--combine-sources list))))
+										 (if (eq 'silence (plist-get (car current) :source))
+												 (list
+													:silence t
+													:filter (format "aevalsrc=exprs=0:d=%.3fs" (apply '+ (mapcar (lambda (o) (/ (plist-get o :duration-ms) 1000.0)) current))))
+											 ;; regular source
+											 (list
+												:input (list "-i" (plist-get (car current) :source))
+												:filter (format "aselect='%s',asetpts='N/SR/TB'"
+																				(mapconcat
+																				 (lambda (o)
+																					 (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
+																								 (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
+																						 (cond
+																							((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
+																							(start-s (format "gte(t,%.3f)" start-s))
+																							(stop-s (format "lte(t,%.3f)" stop-s)))))
+																				 current
+																				 "+")))))
+									 (compile-media--combine-times
+										(compile-media--combine-sources
+										 (compile-media--handle-padding list))))))
       (list
        :input
        (seq-mapcat (lambda (o) (plist-get o :input)) groups)
@@ -707,12 +758,20 @@ START-INPUT should have the numerical index for the starting input file."
        (concat
         (string-join (seq-map-indexed
                       (lambda (o i)
-                        (format "[%d:a]%s[%s]"
-                                (+ (or start-input 0) i)
-                                (plist-get o :filter)
-                                (if (> (length groups) 1)
-                                    (format "a%d" i)
-                                  "a")))
+												(if (plist-get o :silence)
+														(progn
+															(setq silence-counter (1+ silence-counter))
+															(format "%s[%s]"
+																			(plist-get o :filter)
+																			(if (> (length groups) 1)
+																					(format "a%d" i)
+																				"a")))
+													(format "[%d:a]%s[%s]"
+																	(- (+ (or start-input 0) i) silence-counter)
+																	(plist-get o :filter)
+																	(if (> (length groups) 1)
+																			(format "a%d" i)
+																		"a"))))
                       groups)
                      ";")
         (if (> (length groups) 1)
