@@ -65,7 +65,7 @@ If nil, omit the description."
   :type 'integer :group 'compile-media)
 (defcustom compile-media-output-video-height 720 "Video will be the specified number of pixels tall."
   :type 'integer :group 'compile-media)
-(defcustom compile-media-output-video-fps 30 "If non-nil and greater than 0, use these frames per second."
+(defcustom compile-media-output-video-fps nil "If non-nil and greater than 0, use these frames per second."
 	:type 'integer :group 'compile-media)
 (defcustom compile-media-description-drawtext-filter-params "fontcolor=white:x=5:y=5:fontsize=40"
   "Additional filter arguments for drawing the visual description."
@@ -221,7 +221,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
 									 (list :index i
 												 :filter
 												 (concat
-													(if (> (or compile-media-output-video-fps 0))
+													(if (and compile-media-output-video-fps  (> compile-media-output-video-fps 0))
 															(format "fps=%d," compile-media-output-video-fps)
 														"")
 													(compile-media--scale-filter o))))
