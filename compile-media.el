@@ -66,7 +66,7 @@ If nil, omit the description."
 (defcustom compile-media-output-video-height 720 "Video will be the specified number of pixels tall."
   :type 'integer :group 'compile-media)
 (defcustom compile-media-output-video-fps nil "If non-nil and greater than 0, use these frames per second."
-	:type 'integer :group 'compile-media)
+  :type 'integer :group 'compile-media)
 (defcustom compile-media-description-drawtext-filter-params "fontcolor=white:x=5:y=5:fontsize=40"
   "Additional filter arguments for drawing the visual description."
   :type 'string :group 'compile-media)
@@ -78,7 +78,7 @@ Return nil if TIME-STRING doesn't match the pattern."
   (if (numberp time-string) (* time-string 1000.0)
     (save-match-data
       (when (string-match "\\(\\([0-9]+\\):\\)?\\([0-9]+\\):\\([0-9]+\\)\\(?:\\.\\([0-9]+\\)\\)?"
-													time-string)
+                          time-string)
         (let ((hours (string-to-number (or (match-string 2 time-string) "0")))
               (mins  (string-to-number (match-string 3 time-string)))
               (secs  (string-to-number (match-string 4 time-string)))
@@ -178,98 +178,98 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
   "Return the FFmpeg filter needed to add O's :description or :text."
   (when (or (plist-get o :description) (plist-get o :text))
     (concat "drawtext=" compile-media-description-drawtext-filter-params ":text="
-						(replace-regexp-in-string
-						 "[\]\[,:/!]"
-						 "\\\\\\&"
-						 (replace-regexp-in-string
-							"'"
-							(concat (make-string 28 ?\\) "'")
-							(or (plist-get o :description) (plist-get o :text))))
-						(if (compile-media--between o)
-								(format ":enable='%s'"
-												(compile-media--between o))
-							""))))
+            (replace-regexp-in-string
+             "[\]\[,:/!]"
+             "\\\\\\&"
+             (replace-regexp-in-string
+              "'"
+              (concat (make-string 28 ?\\) "'")
+              (or (plist-get o :description) (plist-get o :text))))
+            (if (compile-media--between o)
+                (format ":enable='%s'"
+                        (compile-media--between o))
+              ""))))
 ;; (insert "\n" (compile-media--description-filter (list :description "that's okay")))
 
 (defun compile-media--format-text-track (text output)
-	(list :filter
-				(format "%s[%s]"
-								(mapconcat
-								 (lambda (o)
-									 (when (plist-get o :text)
-										 (compile-media--description-filter o)))
-								 (if (eq (car text) 'text) (cdr text) text)
-								 ",")
-								output)))
+  (list :filter
+        (format "%s[%s]"
+                (mapconcat
+                 (lambda (o)
+                   (when (plist-get o :text)
+                     (compile-media--description-filter o)))
+                 (if (eq (car text) 'text) (cdr text) text)
+                 ",")
+                output)))
 
 (defun compile-media--format-visuals-for-a-single-track (visuals output)
-	(let* (input-list
-				 filter-list
-				 (info
-					(seq-map-indexed
-					 (lambda (o i)
-						 (cond
-							((plist-get o :source)	; visual specified
-							 (let* ((source (plist-get o :source)))
-								 (funcall
-									(cond
-									 ((string-match "mp4\\|webm\\|mkv" source) 'compile-media--prepare-video)
-									 ((string-match "gif$" source) 'compile-media--prepare-animated-gif)
-									 (t 'compile-media--prepare-static-image))
-									(append
-									 o
-									 (list :index i
-												 :filter
-												 (concat
-													(if (and compile-media-output-video-fps  (> compile-media-output-video-fps 0))
-															(format "fps=%d," compile-media-output-video-fps)
-														"")
-													(compile-media--scale-filter o))))
-									(if (= (length visuals) 1) output (format "r%d" i)))))
-							((plist-get o :text)				; drawtext
-							 (append o (list :filter (compile-media--description-filter o))))))
-					 visuals)))
-		(setq filter-list
-					(append
-					 (mapcar (lambda (o) (plist-get o :filter)) info)
-					 (when (> (length info) 1)
-						 (list (compile-media--concat (length visuals) "v=1:a=0" "r" output)))))
-		(setq input-list
-					(append (seq-mapcat (lambda (o) (plist-get o :input)) info)
-									input-list))
-		(list :input input-list :filter (string-join filter-list ";")
-					:input-count (length visuals))))
+  (let* (input-list
+         filter-list
+         (info
+          (seq-map-indexed
+           (lambda (o i)
+             (cond
+              ((plist-get o :source)  ; visual specified
+               (let* ((source (plist-get o :source)))
+                 (funcall
+                  (cond
+                   ((string-match "mp4\\|webm\\|mkv" source) 'compile-media--prepare-video)
+                   ((string-match "gif$" source) 'compile-media--prepare-animated-gif)
+                   (t 'compile-media--prepare-static-image))
+                  (append
+                   o
+                   (list :index i
+                         :filter
+                         (concat
+                          (if (and compile-media-output-video-fps  (> compile-media-output-video-fps 0))
+                              (format "fps=%d," compile-media-output-video-fps)
+                            "")
+                          (compile-media--scale-filter o))))
+                  (if (= (length visuals) 1) output (format "r%d" i)))))
+              ((plist-get o :text)        ; drawtext
+               (append o (list :filter (compile-media--description-filter o))))))
+           visuals)))
+    (setq filter-list
+          (append
+           (mapcar (lambda (o) (plist-get o :filter)) info)
+           (when (> (length info) 1)
+             (list (compile-media--concat (length visuals) "v=1:a=0" "r" output)))))
+    (setq input-list
+          (append (seq-mapcat (lambda (o) (plist-get o :input)) info)
+                  input-list))
+    (list :input input-list :filter (string-join filter-list ";")
+          :input-count (length visuals))))
 
 (defun compile-media--format-open-captions (subtitles output)
-	"Determine the arguments for SUBTITLES.
+  "Determine the arguments for SUBTITLES.
 Overlay on the video stream from INPUT.
 Returns a plist with :input, :filter, and :output."
-	(let* ((options (if (listp (plist-get (car subtitles) :open-captions))
-											(plist-get (car subtitles) :open-captions)
-										nil))
-				 (bg-color (or (plist-get options :bg) "&H00000000"))
-				 (outline-color (or (plist-get options :outline) "&H66000000"))
-				 (fg-color (or (plist-get options :fg) "&HFFFFFF"))
-				 (bold (or (plist-get options :bold) "0"))
-				 (font-name (or (plist-get options :font-name) "Arial"))
-				 (font-size (or (plist-get options :font-size) 24))
-				 (alignment (or (plist-get options :alignment) 10)))
-		(list
-		 :input
-		 nil
-		 :filter
-		 (format "subtitles=%s:force_style='Fontname=%s,Fontsize=%s,PrimaryColour=%s,OutlineColour=%s,BorderStyle=3,Outline=3,Alignment=%s,Bold=%s,BackColour=%s'[%s]"
-						 (plist-get (car subtitles) :source)
-						 font-name
-						 font-size
-						 fg-color
-						 outline-color
-						 alignment
-						 bold
-						 bg-color
-						 output)
-		 :output
-		 nil)))
+  (let* ((options (if (listp (plist-get (car subtitles) :open-captions))
+                      (plist-get (car subtitles) :open-captions)
+                    nil))
+         (bg-color (or (plist-get options :bg) "&H00000000"))
+         (outline-color (or (plist-get options :outline) "&H66000000"))
+         (fg-color (or (plist-get options :fg) "&HFFFFFF"))
+         (bold (or (plist-get options :bold) "0"))
+         (font-name (or (plist-get options :font-name) "Arial"))
+         (font-size (or (plist-get options :font-size) 24))
+         (alignment (or (plist-get options :alignment) 10)))
+    (list
+     :input
+     nil
+     :filter
+     (format "subtitles=%s:force_style='Fontname=%s,Fontsize=%s,PrimaryColour=%s,OutlineColour=%s,BorderStyle=3,Outline=3,Alignment=%s,Bold=%s,BackColour=%s'[%s]"
+             (plist-get (car subtitles) :source)
+             font-name
+             font-size
+             fg-color
+             outline-color
+             alignment
+             bold
+             bg-color
+             output)
+     :output
+     nil)))
 
 (defun compile-media--format-visuals (visual-tracks &optional output)
   "Determine the arguments for VISUALS.
@@ -277,140 +277,140 @@ There may be multiple video tracks. If so, they are overlaid.
 If OUTPUT is specified, use that as the name of the output stream.
 Returns a plist with :input, :filter, and :output.
 "
-	(when (eq (car visual-tracks) 'video)
-		(setq visual-tracks (list visual-tracks))) ; old style, just one video track
-	(let ((offset 0)
-				input-list
-				filter-list
-				output-list
-				video-track-output
-				(input-count 0)
-				(video-tracks (seq-filter (lambda (o) (eq (car o) 'video)) visual-tracks))
-				(text-track (assoc-default 'text visual-tracks))
-				(open-captions-track (assoc-default 'subtitles visual-tracks)))
-		;; TODO process video-tracks, then draw text on top
-		(when video-tracks
-			(seq-map-indexed
-			 (lambda (visuals track-i)
-				 (let* ((output (format "v-input-%d" track-i))
-								info filter input)
-					 ;; v-input-# will contain the visuals for that track
-					 (setq info
-								 (pcase (car visuals)
-									 ('video (compile-media--format-visuals-for-a-single-track (cdr visuals)
-																																output))
-									 ('text (compile-media--format-text-track (cdr visuals) output))))
-					 (setq input-list (append input-list (plist-get info :input)))
-					 (setq input-count (+ input-count (or (plist-get info :input-count) 0)))
-					 (push (plist-get info :filter)
-								 filter-list)
-					 ;; overlay as we go along
-					 (if (> track-i 0)
-							 (push (format "[v-%s-%d][v-input-%d]overlay[v-overlaid-%d]"
-														 (if (= track-i 1)
-																 "input"
-															 "overlaid"))
-										 filter-list))))
-			 video-tracks))
-		;; at the end of this, we either have v-input-0 (for one track) or v-overlaid-# (len - 1)
-		(setq video-track-output (pcase (length video-tracks)
-															 (0 nil)
-															 (1 "v-input-0")
-															 (_ (format "v-overlaid-%d" (1- (length video-tracks))))))
-		;; no video input? use a black screen
-		(if (and (null input-list) (or text-track open-captions-track))
-				(setq input-list `("-f" "lavfi" "-i" ,(format "color=size=%dx%d:color=black" compile-media-output-video-width compile-media-output-video-height))
-							input-count (1+ input-count)))
-		(when text-track
-			(push
-			 (concat (if video-track-output (format "[%s]" video-track-output) "")
-							 (plist-get (compile-media--format-open-captions open-captions-track "after-text") :filter))
-			 filter-list)
-			(setq video-track-output "after-text"))
-		(when open-captions-track
-			(push
-			 (format "[%s]%s"
-							 video-track-output
-							 (plist-get (compile-media--format-open-captions open-captions-track "open-captions"):filter))
-			 filter-list)
-			(setq video-track-output "open-captions")
-			;; (if video-track-output
-			;; 		(progn
-			;; 			;; (push (format "[%s][open-captions]overlay[after-captions]" video-track-output) filter-list)
-			;; 			(setq video-track-output "after-captions"))
-			;; 	(setq video-track-output "open-captions"))
-			)
-		(list :input input-list
-					:filter (when filter-list (string-join (reverse filter-list) ";"))
-					:output (when (and (not output) video-track-output) (list "-map:v" (format "[%s]" video-track-output)))
-					:input-count input-count)))
+  (when (eq (car visual-tracks) 'video)
+    (setq visual-tracks (list visual-tracks))) ; old style, just one video track
+  (let ((offset 0)
+        input-list
+        filter-list
+        output-list
+        video-track-output
+        (input-count 0)
+        (video-tracks (seq-filter (lambda (o) (eq (car o) 'video)) visual-tracks))
+        (text-track (assoc-default 'text visual-tracks))
+        (open-captions-track (assoc-default 'subtitles visual-tracks)))
+    ;; TODO process video-tracks, then draw text on top
+    (when video-tracks
+      (seq-map-indexed
+       (lambda (visuals track-i)
+         (let* ((output (format "v-input-%d" track-i))
+                info filter input)
+           ;; v-input-# will contain the visuals for that track
+           (setq info
+                 (pcase (car visuals)
+                   ('video (compile-media--format-visuals-for-a-single-track (cdr visuals)
+                                                                             output))
+                   ('text (compile-media--format-text-track (cdr visuals) output))))
+           (setq input-list (append input-list (plist-get info :input)))
+           (setq input-count (+ input-count (or (plist-get info :input-count) 0)))
+           (push (plist-get info :filter)
+                 filter-list)
+           ;; overlay as we go along
+           (if (> track-i 0)
+               (push (format "[v-%s-%d][v-input-%d]overlay[v-overlaid-%d]"
+                             (if (= track-i 1)
+                                 "input"
+                               "overlaid"))
+                     filter-list))))
+       video-tracks))
+    ;; at the end of this, we either have v-input-0 (for one track) or v-overlaid-# (len - 1)
+    (setq video-track-output (pcase (length video-tracks)
+                               (0 nil)
+                               (1 "v-input-0")
+                               (_ (format "v-overlaid-%d" (1- (length video-tracks))))))
+    ;; no video input? use a black screen
+    (if (and (null input-list) (or text-track open-captions-track))
+        (setq input-list `("-f" "lavfi" "-i" ,(format "color=size=%dx%d:color=black" compile-media-output-video-width compile-media-output-video-height))
+              input-count (1+ input-count)))
+    (when text-track
+      (push
+       (concat (if video-track-output (format "[%s]" video-track-output) "")
+               (plist-get (compile-media--format-open-captions open-captions-track "after-text") :filter))
+       filter-list)
+      (setq video-track-output "after-text"))
+    (when open-captions-track
+      (push
+       (format "[%s]%s"
+               video-track-output
+               (plist-get (compile-media--format-open-captions open-captions-track "open-captions"):filter))
+       filter-list)
+      (setq video-track-output "open-captions")
+      ;; (if video-track-output
+      ;;     (progn
+      ;;       ;; (push (format "[%s][open-captions]overlay[after-captions]" video-track-output) filter-list)
+      ;;       (setq video-track-output "after-captions"))
+      ;;   (setq video-track-output "open-captions"))
+      )
+    (list :input input-list
+          :filter (when filter-list (string-join (reverse filter-list) ";"))
+          :output (when (and (not output) video-track-output) (list "-map:v" (format "[%s]" video-track-output)))
+          :input-count input-count)))
 
 (defun compile-media--prepare-static-image (info &optional output)
   "Return arguments for static image in INFO."
   (list
    :input
    (append (list "-loop" "1" "-t" (format "%.3f" (/ (or
-																										 (plist-get info :duration-ms)
-																										 (plist-get info :duration)
-																										 (- (plist-get info :stop-ms)
-																												(plist-get info :start-ms)))
-																										1000.0)))
-					 (plist-get info :before-input)
-					 (list "-i" (plist-get info :source))
-					 (plist-get info :after-input))
+                                                     (plist-get info :duration-ms)
+                                                     (plist-get info :duration)
+                                                     (- (plist-get info :stop-ms)
+                                                        (plist-get info :start-ms)))
+                                                    1000.0)))
+           (plist-get info :before-input)
+           (list "-i" (plist-get info :source))
+           (plist-get info :after-input))
    :filter
    (format "[%d:v]%s[%s]"
            (plist-get info :index)
-					 (plist-get info :filter)
-					 (or output
-							 (format "r%d" (plist-get info :index))))))
+           (plist-get info :filter)
+           (or output
+               (format "r%d" (plist-get info :index))))))
 
 (defun compile-media--prepare-animated-gif (info &optional output)
   "Return arguments for animated gif specified in INFO."
   (let ((gif-frames (compile-media-get-animated-gif-frames
                      (plist-get info :source)))
-				(duration (/ (or
-											(plist-get info :duration-ms)
-											(plist-get info :duration)
-											(- (plist-get info :stop-ms)
-												 (plist-get info :start-ms)))
-										 1000.0)))
+        (duration (/ (or
+                      (plist-get info :duration-ms)
+                      (plist-get info :duration)
+                      (- (plist-get info :stop-ms)
+                         (plist-get info :start-ms)))
+                     1000.0)))
     (list
      :input
-		 (if (and (plist-get info :loop-if-shorter)
-							(< (compile-media-get-file-duration-ms (plist-get info :source))
-								 (* duration 1000)))
-				 (list "-stream_loop" "-1"
-							 "-t"
-							 duration
-							 "-i"
-							 (plist-get info :source))
-			 (list "-r" (format "%.3f" (/ gif-frames duration)) "-i"
-																									(plist-get info :source)))
+     (if (and (plist-get info :loop-if-shorter)
+              (< (compile-media-get-file-duration-ms (plist-get info :source))
+                 (* duration 1000)))
+         (list "-stream_loop" "-1"
+               "-t"
+               duration
+               "-i"
+               (plist-get info :source))
+       (list "-r" (format "%.3f" (/ gif-frames duration)) "-i"
+             (plist-get info :source)))
      :filter
      ;; (format "-i %s" filename)
      (format "[%d:v]%s[%s]"
              (plist-get info :index)
-						 (if (stringp (plist-get info :filter))
-								 (plist-get info :filter)
-							 (string-join
-								(plist-get info :filter)
-								","))
-						 (or output (format "r%d" (plist-get info :index)))))))
+             (if (stringp (plist-get info :filter))
+                 (plist-get info :filter)
+               (string-join
+                (plist-get info :filter)
+                ","))
+             (or output (format "r%d" (plist-get info :index)))))))
 
 (defun compile-media--between (info)
-	(let* ((start-ms (plist-get info :start-ms))
+  (let* ((start-ms (plist-get info :start-ms))
          (stop-ms (plist-get info :stop-ms))
          (start-s (and start-ms (/ start-ms 1000.0)))
          (stop-s (and stop-ms (/ stop-ms 1000.0))))
-		(cond
+    (cond
      ((and start-ms stop-ms) (format "between(t,%.3f,%.3f)" start-s stop-s))
      (start-ms (format "gte(t,%.3f)" start-s))
      (stop-ms (format "lte(t,%.3f)" stop-s)))))
 
 (defun compile-media--prepare-video (info &optional output)
   "Return ffmpeg arguments for videos specified by INFO."
-	(let* ((start-ms (plist-get info :start-ms))
+  (let* ((start-ms (plist-get info :start-ms))
          (stop-ms (plist-get info :stop-ms))
          (start-s (and start-ms (/ start-ms 1000.0)))
          (stop-s (and stop-ms (/ stop-ms 1000.0)))
@@ -418,54 +418,54 @@ Returns a plist with :input, :filter, and :output.
          (video-duration (if duration (or (plist-get info :video-duration)
                                           (compile-media-get-file-duration-ms
                                            (plist-get info :source))))))
-		(list
-		 :input
-		 (if (and (plist-get info :loop-if-shorter)
-							(< video-duration duration))
-				 (list "-stream_loop" "-1" "-t" (/ duration 1000.0) "-i" (plist-get info :source))
-			 (delq nil
-						 (append
-							(list "-i" (plist-get info :source))
-							(if (plist-get info :same-edits)
-									(list "-t"
-												(format
-												 "%.3f"
-												 (/
-													(plist-get (car (last (plist-get info :same-edits)))
-																		 :stop-ms)
-													1000.0)))))))
-		 :filter
-		 (format "[%d:v]%s[%s]"
-						 (plist-get info :index)
-						 (string-join
-							(delq nil
-										(list
-										 (cond
-											((plist-get info :same-edits)
-											 (format "select='%s',setpts='N/FRAME_RATE/TB'"
-                                      (mapconcat
-                                       #'compile-media--select-spans
-                                       (compile-media--combine-times (plist-get info :same-edits))
-                                       "+")))
-											((and start-ms stop-ms) (format "select='between(t,%.3f,%.3f)'" start-s stop-s))
-											(start-ms (format "select='gte(t,%.3f)'" start-s))
-											(stop-ms (format "select='lte(t,%.3f)'" stop-s)))
-										 (cond
-											((plist-get info :same-edits) "setpts=PTS-STARTPTS")
-											((and (plist-get info :keep-original-duration)
-														(<= video-duration duration))
-											 (format "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f" (/ (- duration video-duration) 1000.0)))
+    (list
+     :input
+     (if (and (plist-get info :loop-if-shorter)
+              (< video-duration duration))
+         (list "-stream_loop" "-1" "-t" (/ duration 1000.0) "-i" (plist-get info :source))
+       (delq nil
+             (append
+              (list "-i" (plist-get info :source))
+              (if (plist-get info :same-edits)
+                  (list "-t"
+                        (format
+                         "%.3f"
+                         (/
+                          (plist-get (car (last (plist-get info :same-edits)))
+                                     :stop-ms)
+                          1000.0)))))))
+     :filter
+     (format "[%d:v]%s[%s]"
+             (plist-get info :index)
+             (string-join
+              (delq nil
+                    (list
+                     (cond
+                      ((plist-get info :same-edits)
+                       (format "select='%s',setpts='N/FRAME_RATE/TB'"
+                               (mapconcat
+                                #'compile-media--select-spans
+                                (compile-media--combine-times (plist-get info :same-edits))
+                                "+")))
+                      ((and start-ms stop-ms) (format "select='between(t,%.3f,%.3f)'" start-s stop-s))
+                      (start-ms (format "select='gte(t,%.3f)'" start-s))
+                      (stop-ms (format "select='lte(t,%.3f)'" stop-s)))
+                     (cond
+                      ((plist-get info :same-edits) "setpts=PTS-STARTPTS")
+                      ((and (plist-get info :keep-original-duration)
+                            (<= video-duration duration))
+                       (format "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f" (/ (- duration video-duration) 1000.0)))
                       ((and (plist-get info :change-rate)
-														(<= video-duration duration))
-											 (format "setpts=(PTS-STARTPTS)/%.3f,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f"
+                            (<= video-duration duration))
+                       (format "setpts=(PTS-STARTPTS)/%.3f,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f"
                                (plist-get info :change-rate)
                                (/ (- duration video-duration) 1000.0)))
-											(duration (format "setpts=(PTS-STARTPTS)*%.3f,setpts=PTS-STARTPTS" (/ duration (* 1.0 video-duration))))
-											(t "setpts=PTS-STARTPTS"))
-										 (plist-get info :filter)))
-							",")
-						 (or output
-								 (format "r%d" (plist-get info :index)))))))
+                      (duration (format "setpts=(PTS-STARTPTS)*%.3f,setpts=PTS-STARTPTS" (/ duration (* 1.0 video-duration))))
+                      (t "setpts=PTS-STARTPTS"))
+                     (plist-get info :filter)))
+              ",")
+             (or output
+                 (format "r%d" (plist-get info :index)))))))
 
 (defun compile-media-get-animated-gif-frames (filename)
   "Return the number of frames for an animated GIF at FILENAME."
@@ -490,30 +490,30 @@ Returns a plist with :input, :filter, and :output.
 
 (defun compile-media--scale-filter (o)
   "Return the complex filter for scaling O."
-	(let ((size (compile-media-video-dimensions (plist-get o :source))))
-		;; TODO: handle x1, y1, x2, y2, description
-		(if	(and
-				 (null (plist-get o :description))
-				 (or (null compile-media-output-video-width) (= (car size) compile-media-output-video-width))
-				 (or (null compile-media-output-video-height) (= (cdr size) compile-media-output-video-height)))
-				"scale"
-			(format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
-							(if (and (plist-get o :x1) (plist-get o :y1)
-											 (plist-get o :x2) (plist-get o :y2))
-									(format "crop=x=%d:y=%d:w=%d:h=%d,"
-													(plist-get o :x1) (plist-get o :y1)
-													(- (plist-get o :x2) (plist-get o :x1))
-													(- (plist-get o :y2) (plist-get o :y1)))
-								"")
-							compile-media-output-video-width
-							(if (plist-get o :description)
-									(- compile-media-output-video-height
-										 (or compile-media-description-height 0))
-								compile-media-output-video-height)
-							compile-media-output-video-width
-							compile-media-output-video-height
-							(or (and (plist-get o :description) compile-media-description-height) 0)
-							(or (and (plist-get o :description) compile-media-description-height) 0)))))
+  (let ((size (compile-media-video-dimensions (plist-get o :source))))
+    ;; TODO: handle x1, y1, x2, y2, description
+    (if  (and
+          (null (plist-get o :description))
+          (or (null compile-media-output-video-width) (= (car size) compile-media-output-video-width))
+          (or (null compile-media-output-video-height) (= (cdr size) compile-media-output-video-height)))
+        "scale"
+      (format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
+              (if (and (plist-get o :x1) (plist-get o :y1)
+                       (plist-get o :x2) (plist-get o :y2))
+                  (format "crop=x=%d:y=%d:w=%d:h=%d,"
+                          (plist-get o :x1) (plist-get o :y1)
+                          (- (plist-get o :x2) (plist-get o :x1))
+                          (- (plist-get o :y2) (plist-get o :y1)))
+                "")
+              compile-media-output-video-width
+              (if (plist-get o :description)
+                  (- compile-media-output-video-height
+                     (or compile-media-description-height 0))
+                compile-media-output-video-height)
+              compile-media-output-video-width
+              compile-media-output-video-height
+              (or (and (plist-get o :description) compile-media-description-height) 0)
+              (or (and (plist-get o :description) compile-media-description-height) 0)))))
 
 ;; (defun compile-media-ffmpeg-input (file start-ms stop-ms &optional frame-before)
 ;;   "Return the input arguments for FILE from START-MS to STOP-MS.
@@ -532,38 +532,38 @@ Returns a plist with :input, :filter, and :output.
 
 
 (defun compile-media--input-seq-as-list (start count input-prefix)
-	(mapcar (lambda (i) (format "%s%d" input-prefix i)) (number-sequence start (1- (+ start count)))))
+  (mapcar (lambda (i) (format "%s%d" input-prefix i)) (number-sequence start (1- (+ start count)))))
 
 (defun compile-media--input-seq (start count input-prefix)
-	(mapconcat (lambda (i) (format "[%s%d]" input-prefix i)) (number-sequence start (1- (+ start count))) ""))
+  (mapconcat (lambda (i) (format "[%s%d]" input-prefix i)) (number-sequence start (1- (+ start count))) ""))
 
 (defun compile-media--concat (n type input-prefix output-name)
   "Return the concat filter for N inputs of TYPE using INPUT-PREFIX.
 The output is sent to OUTPUT-NAME. TYPE is v=1:a=0 or a=0:v=1."
   (concat
-	 (compile-media--input-seq 0 n input-prefix)
+   (compile-media--input-seq 0 n input-prefix)
    (format "concat=n=%d:%s[%s]" n type output-name)))
 
 (defun compile-media--overlay (input-sequence output-name)
   "Return the overlay filters for N inputs of TYPE using INPUT-PREFIX.
 The output is sent to OUTPUT-NAME. TYPE is v=1:a=0 or a=0:v=1.
 Overlays are done two at a time."
-	(let (result (last (car (last input-sequence))))
-		(car
-		 (seq-reduce
-			(lambda (prev val)
-				(let ((output (if (string= val last)
-													output-name
-												(concat val "-overlaid"))))
-					(cons
-					 (format "%s[%s][%s]overlay[%s]"
-									 (if (car prev) (concat (car prev) ",") "")
-									 (cdr prev)
-									 val
-									 output)
-					 output)))
-			(cdr input-sequence)
-			(cons nil (car input-sequence))))))
+  (let (result (last (car (last input-sequence))))
+    (car
+     (seq-reduce
+      (lambda (prev val)
+        (let ((output (if (string= val last)
+                          output-name
+                        (concat val "-overlaid"))))
+          (cons
+           (format "%s[%s][%s]overlay[%s]"
+                   (if (car prev) (concat (car prev) ",") "")
+                   (cdr prev)
+                   val
+                   output)
+           output)))
+      (cdr input-sequence)
+      (cons nil (car input-sequence))))))
 
 ;;https://emacs.stackexchange.com/questions/48256/how-to-have-a-buffer-interpret-c-m-as-an-actual-carriage-return
 (defun compile-media--process-filter-function (proc input-string)
@@ -601,20 +601,20 @@ SOURCES should be a list of the form
  (subtitles (:source filename)))
 "
   (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
-		(when (assoc-default 'subtitles sources)
-			(cond
-				((plist-get (assoc-default 'subtitles sources) :source)
+    (when (assoc-default 'subtitles sources)
+      (cond
+       ((plist-get (assoc-default 'subtitles sources) :source)
 
-				 (funcall (if (plist-get (assoc-default 'subtitles sources) :temporary)
-											#'rename-file
-										#'copy-file)
-									(plist-get (assoc-default 'subtitles sources) :source)
-									(concat (file-name-sans-extension output-file) ".vtt")
-									t))
-				((plist-get (assoc-default 'subtitles sources) :subtitles)
-				 (subed-create-file
-					(concat (file-name-sans-extension output-file) ".vtt")
-					(plist-get (assoc-default 'subtitles sources) :subtitles)))))
+        (funcall (if (plist-get (assoc-default 'subtitles sources) :temporary)
+                     #'rename-file
+                   #'copy-file)
+                 (plist-get (assoc-default 'subtitles sources) :source)
+                 (concat (file-name-sans-extension output-file) ".vtt")
+                 t))
+       ((plist-get (assoc-default 'subtitles sources) :subtitles)
+        (subed-create-file
+         (concat (file-name-sans-extension output-file) ".vtt")
+         (plist-get (assoc-default 'subtitles sources) :subtitles)))))
     (with-current-buffer (get-buffer-create (format "*ffmpeg-%s*" output-file))
       (when (process-live-p compile-media--conversion-process)
         (quit-process compile-media--conversion-process))
@@ -639,14 +639,14 @@ SOURCES should be a list of the form
       (erase-buffer)
       (insert ffmpeg-cmd "\n")
       (shell-command ffmpeg-cmd (current-buffer))
-			(when (assoc-default 'subtitles sources)
-				(shell-command (format "ffmpeg -y -i %s %s.vtt"
-															 output-file
-															 (file-name-sans-extension output-file))
-											 (current-buffer)))
-			(when (plist-get args :sentinel)
+      (when (assoc-default 'subtitles sources)
+        (shell-command (format "ffmpeg -y -i %s %s.vtt"
+                               output-file
+                               (file-name-sans-extension output-file))
+                       (current-buffer)))
+      (when (plist-get args :sentinel)
         (funcall (plist-get args :sentinel) nil "finished"))
-			(display-buffer (current-buffer)))))
+      (display-buffer (current-buffer)))))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
@@ -659,28 +659,28 @@ SOURCES should be a list of the form
    "+"))
 
 (defun compile-media--handle-padding (list)
-	"Add entries for silence-padding."
-	(reverse
-	 (seq-reduce
-		(lambda (prev val)
-			;; :pad-left
-			(when (plist-get val :pad-left)
-				(setq prev (cons
-										(list :source 'silence
-													:duration-ms (plist-get val :pad-left))
-										prev))
-				(plist-put val :pad-left nil))
-			;; current
-			(setq prev (cons val prev))
-			;; :pad-right
-			(when (plist-get val :pad-right)
-				(setq prev (cons
-										(list :source 'silence
-													:duration-ms (plist-get val :pad-right))
-										prev))
-				(plist-put (car prev) :pad-right nil))
-			prev)
-		list nil)))
+  "Add entries for silence-padding."
+  (reverse
+   (seq-reduce
+    (lambda (prev val)
+      ;; :pad-left
+      (when (plist-get val :pad-left)
+        (setq prev (cons
+                    (list :source 'silence
+                          :duration-ms (plist-get val :pad-left))
+                    prev))
+        (plist-put val :pad-left nil))
+      ;; current
+      (setq prev (cons val prev))
+      ;; :pad-right
+      (when (plist-get val :pad-right)
+        (setq prev (cons
+                    (list :source 'silence
+                          :duration-ms (plist-get val :pad-right))
+                    prev))
+        (plist-put (car prev) :pad-right nil))
+      prev)
+    list nil)))
 
 (defun compile-media--combine-sources (list)
   "Combine sources in LIST."
@@ -691,9 +691,9 @@ SOURCES should be a list of the form
              (lambda (o)
                (prog1 (or (null previous)
                           (and
-													 ;; same source, monotonically increasing in time
-													 (stringp (plist-get o :source))
-													 (stringp (plist-get previous :source))
+                           ;; same source, monotonically increasing in time
+                           (stringp (plist-get o :source))
+                           (stringp (plist-get previous :source))
                            (string= (plist-get o :source) (plist-get previous :source))
                            (plist-get o :start-ms)
                            (plist-get previous :stop-ms)
@@ -706,26 +706,26 @@ SOURCES should be a list of the form
     (reverse result)))
 
 (defun compile-media--combine-times (list)
-	"Combine :start-ms and :stop-ms that are only 1 ms apart."
-	(mapcar
-	 (lambda (entry)
-		 (reverse
-			(seq-reduce
-			 (lambda (prev val)
-				 (cond
-					((null prev) (list val))
-					((and
-						(plist-get val :start-ms)
-						(plist-get (car prev) :stop-ms)
-						(= (plist-get val :start-ms)
-							 (1+ (plist-get (car prev) :stop-ms))))
-					 (plist-put (car prev) :stop-ms (plist-get val :stop-ms))
-					 prev)
-					(t
-					 (cons val prev))))
-			 (cdr entry)
-			 (list (car entry)))))
-	 list))
+  "Combine :start-ms and :stop-ms that are only 1 ms apart."
+  (mapcar
+   (lambda (entry)
+     (reverse
+      (seq-reduce
+       (lambda (prev val)
+         (cond
+          ((null prev) (list val))
+          ((and
+            (plist-get val :start-ms)
+            (plist-get (car prev) :stop-ms)
+            (= (plist-get val :start-ms)
+               (1+ (plist-get (car prev) :stop-ms))))
+           (plist-put (car prev) :stop-ms (plist-get val :stop-ms))
+           prev)
+          (t
+           (cons val prev))))
+       (cdr entry)
+       (list (car entry)))))
+   list))
 
 (defun compile-media--format-audio (list &optional start-input)
   "Determine arguments for audio in LIST.
@@ -733,29 +733,30 @@ LIST is a plist of (:start-ms ... :stop-ms ... :source)
 START-INPUT should have the numerical index for the starting input file."
   (when list
     (let ((silence-counter 0)
-					(groups
+          (groups
            (mapcar (lambda (current)
-										 (if (eq 'silence (plist-get (car current) :source))
-												 (list
-													:silence t
-													:filter (format "aevalsrc=exprs=0:d=%.3fs" (apply '+ (mapcar (lambda (o) (/ (plist-get o :duration-ms) 1000.0)) current))))
-											 ;; regular source
-											 (list
-												:input (list "-i" (plist-get (car current) :source))
-												:filter (format "aselect='%s',asetpts='N/SR/TB'"
-																				(mapconcat
-																				 (lambda (o)
-																					 (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
-																								 (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
-																						 (cond
-																							((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
-																							(start-s (format "gte(t,%.3f)" start-s))
-																							(stop-s (format "lte(t,%.3f)" stop-s)))))
-																				 current
-																				 "+")))))
-									 (compile-media--combine-times
-										(compile-media--combine-sources
-										 (compile-media--handle-padding list))))))
+                     (if (eq 'silence (plist-get (car current) :source))
+                         (list
+                          :silence t
+                          :filter (format "aevalsrc=exprs=0:d=%.3fs" (apply '+ (mapcar (lambda (o) (/ (plist-get o :duration-ms) 1000.0)) current))))
+                       ;; regular source
+                       (list
+                        :input (list "-i" (plist-get (car current) :source))
+                        :filter
+                        (format "aselect='%s',asetpts='N/SR/TB'"
+                                (mapconcat
+                                 (lambda (o)
+                                   (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
+                                         (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
+                                     (cond
+                                      ((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
+                                      (start-s (format "gte(t,%.3f)" start-s))
+                                      (stop-s (format "lte(t,%.3f)" stop-s)))))
+                                 current
+                                 "+")))))
+                   (compile-media--combine-times
+                    (compile-media--combine-sources
+                     (compile-media--handle-padding list))))))
       (list
        :input
        (seq-mapcat (lambda (o) (plist-get o :input)) groups)
@@ -763,20 +764,20 @@ START-INPUT should have the numerical index for the starting input file."
        (concat
         (string-join (seq-map-indexed
                       (lambda (o i)
-												(if (plist-get o :silence)
-														(progn
-															(setq silence-counter (1+ silence-counter))
-															(format "%s[%s]"
-																			(plist-get o :filter)
-																			(if (> (length groups) 1)
-																					(format "a%d" i)
-																				"a")))
-													(format "[%d:a]%s[%s]"
-																	(- (+ (or start-input 0) i) silence-counter)
-																	(plist-get o :filter)
-																	(if (> (length groups) 1)
-																			(format "a%d" i)
-																		"a"))))
+                        (if (plist-get o :silence)
+                            (progn
+                              (setq silence-counter (1+ silence-counter))
+                              (format "%s[%s]"
+                                      (plist-get o :filter)
+                                      (if (> (length groups) 1)
+                                          (format "a%d" i)
+                                        "a")))
+                          (format "[%d:a]%s[%s]"
+                                  (- (+ (or start-input 0) i) silence-counter)
+                                  (plist-get o :filter)
+                                  (if (> (length groups) 1)
+                                      (format "a%d" i)
+                                    "a"))))
                       groups)
                      ";")
         (if (> (length groups) 1)
@@ -801,45 +802,45 @@ START-INPUT should have the numerical index for the starting input file."
 (defun compile-media-get-args (sources output-file)
   "Return FFmpeg arguments for combining SOURCES into OUTPUT-FILE."
   (let* ((has-open-captions (plist-get (cadr (assoc 'subtitles sources)) :open-captions))
-				 visual-args
+         visual-args
          audio-args
-				 visual-output)
+         visual-output)
     (mapc (lambda (track) (compile-media--convert-timestamps track)) sources)
     (setq visual-args (compile-media--format-visuals
-											 (seq-filter (lambda (o) (member (car o)
-																											 (if has-open-captions
-																													 '(video text subtitles)
-																												 '(video text))))
-																	 sources)))
+                       (seq-filter (lambda (o) (member (car o)
+                                                       (if has-open-captions
+                                                           '(video text subtitles)
+                                                         '(video text))))
+                                   sources)))
     (setq audio-args (compile-media--format-audio (cdr (assoc 'audio sources)) (plist-get visual-args :input-count)))
     (append
      (plist-get visual-args :input)
      (plist-get audio-args :input)
      ;; (when (and (assoc-default 'subtitles sources) (string-match "webm$" output-file) (not has-open-captions))
-		 ;; 	 (seq-mapcat (lambda (f)
-		 ;; 								 (list "-i" (plist-get f :source)))
-		 ;; 							 (assoc-default 'subtitles sources)))
-		 (when (delq nil
+     ;;    (seq-mapcat (lambda (f)
+     ;;                  (list "-i" (plist-get f :source)))
+     ;;                (assoc-default 'subtitles sources)))
+     (when (delq nil
                  (list
                   (plist-get visual-args :filter)
                   (plist-get audio-args :filter)))
-			 (list "-filter_complex" (string-join
-																(delq nil
-																			(list
-																			 (plist-get visual-args :filter)
-																			 (plist-get audio-args :filter)))
-																";")))
+       (list "-filter_complex" (string-join
+                                (delq nil
+                                      (list
+                                       (plist-get visual-args :filter)
+                                       (plist-get audio-args :filter)))
+                                ";")))
      (plist-get visual-args :output)
      (plist-get audio-args :output)
      ;; (when (and (assoc-default 'subtitles sources) (string-match "webm$" output-file) (not has-open-captions))
      ;;   (list "-map:s"
-		 ;; 				 (concat (number-to-string (+
-		 ;; 																		(or (plist-get visual-args :input-count) 0)
-		 ;; 																		(or (plist-get audio-args :input-count) 0)))
-		 ;; 								 "?")))
+     ;;          (concat (number-to-string (+
+     ;;                                     (or (plist-get visual-args :input-count) 0)
+     ;;                                     (or (plist-get audio-args :input-count) 0)))
+     ;;                  "?")))
      compile-media-ffmpeg-arguments
      (list "-y"
-					 output-file)
+           output-file)
      nil)))
 
 (defun compile-media-get-command (sources output-file)
@@ -856,10 +857,10 @@ START-INPUT should have the numerical index for the starting input file."
           " ")))
     (concat compile-media-ffmpeg-executable " "
             (mapconcat
-						 (lambda (s) (format "\"%s\"" s))
-						 (compile-media-get-args
+             (lambda (s) (format "\"%s\"" s))
+             (compile-media-get-args
               sources output-file)
-						 " ")
+             " ")
             (if (> (length temporary-files) 0)
                 (concat " && rm " temporary-files)
               ""))))
