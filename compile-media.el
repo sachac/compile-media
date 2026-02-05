@@ -455,6 +455,11 @@ Returns a plist with :input, :filter, and :output.
 											((and (plist-get info :keep-original-duration)
 														(<= video-duration duration))
 											 (format "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f" (/ (- duration video-duration) 1000.0)))
+                      ((and (plist-get info :change-rate)
+														(<= video-duration duration))
+											 (format "setpts=(PTS-STARTPTS)/%.3f,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%.3f"
+                               (plist-get info :change-rate)
+                               (/ (- duration video-duration) 1000.0)))
 											(duration (format "setpts=(PTS-STARTPTS)*%.3f,setpts=PTS-STARTPTS" (/ duration (* 1.0 video-duration))))
 											(t "setpts=PTS-STARTPTS"))
 										 (plist-get info :filter)))
