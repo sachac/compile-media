@@ -589,7 +589,198 @@ If :include is not specified, include it for all the tracks."
      (cons track (seq-filter (lambda (o) (or (null (plist-get o :include)) (member track (plist-get o :include)))) sources)))
    '(video audio)))
 
-(defun compile-media (sources output-file &rest args)
+(defvar compile-media--debug nil)
+
+(defun compile-media--format-trim (trims)
+  "Prepare the filter for trimming parts of the audio."
+  (concat
+   "1"
+   (mapconcat
+    (lambda (o)
+      (format "-between(t,%.3f,%.3f)"
+              (/ (car o) 1000.0)
+              (/ (cadr o) 1000.0)))
+    trims
+    "")))
+
+(defun compile-media--make-intermediate-files (sources temp-dir)
+  "Write each segment of SOURCES to a file in TEMP-DIR for concatenation.
+SOURCES should be a list of the form
+((video (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts))
+ (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
+ (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts)))
+
+Other options:
+:pad-left number-of-seconds
+:pad-right number-of-seconds
+:trim ((start-ms stop-ms) ...)
+
+Also create the file needed for concatenating everything.
+Each audio and video segment should be a separate file for ease of combining.
+If CALLBACK is non-nil, call that once the output is finished.
+Return ((audio . list-of-files) (video . list-of-files))."
+  (let ((audio-index 0)
+        (video-index 0)
+        (a-list (expand-file-name "audio_list.txt" temp-dir))
+        (v-list (expand-file-name "video_list.txt" temp-dir))
+        processed-audio
+        processed-video)
+    (dolist (seg (cdr (assoc 'audio sources)))
+      (let* ((source (plist-get seg :source))
+             (start-ms (or (plist-get seg :start-ms) 0))
+             (stop-ms (plist-get seg :stop-ms))
+             (duration-ms (when stop-ms (- stop-ms start-ms)))
+             (dest-file (expand-file-name (format "audio-%04d.wav" audio-index) temp-dir))
+             (clip
+              (if (plist-get seg :trim)
+                  (format "[0:a]%s,asetpts=N/R/SB,aresample=async=1"
+                          (compile-media--format-trim (plist-get seg :trim)))
+                "[0:a]aresample=async=1")))
+        ;; handle silence
+        (let ((cmd
+               (append
+                (list "ffmpeg" "-y")
+                (list
+                 "-ss" (format "%f" (/ start-ms 1000.0))) ;; Seek BEFORE -i for speed and reset
+                (when duration-ms (list "-t" (format "%f" (/ duration-ms 1000.0))))
+                (list "-i" (expand-file-name source))
+                (when (plist-get seg :pad-left)
+                  (list "-f" "lavfi" "-t"
+                        (format "%.3f" (/ (plist-get seg :pad-left) 1000.0))
+                        "-i"
+                        (format "anullsrc=r=%d:cl=stereo"
+                                compile-media-ffmpeg-audio-rate)))
+                (when (plist-get seg :pad-right)
+                  (list "-f" "lavfi" "-t"
+                        (format "%.3f" (/ (plist-get seg :pad-right) 1000.0))
+                        "-i"
+                        (format "anullsrc=r=%d:cl=stereo"
+                                compile-media-ffmpeg-audio-rate)))
+                (cond
+                 ((and (plist-get seg :pad-left)
+                       (plist-get seg :pad-right))
+                  (list "-filter_complex"
+                        (concat clip "[clip];[1:a][clip][2:a]concat=n=3:v=0:a=1[out]")))
+                 ((plist-get seg :pad-left)
+                  (list "-filter_complex"
+                        (concat clip "[clip];[1:a][clip]concat=n=2:v=0:a=1[out]")))
+                 ((plist-get seg :pad-right)
+                  (list "-filter_complex"
+                        (concat clip "[clip];[clip][1:a]concat=n=2:v=0:a=1[out]")))
+                 (t (list "-filter_complex" (concat clip "[out]"))))
+                (list
+                 "-ar" (number-to-string compile-media-ffmpeg-audio-rate) "-ac" "2"
+                 "-map" "[out]"
+                 "-map_metadata" "-1"
+                 dest-file))))
+          (when compile-media--debug (message "%s" (string-join cmd " ")))
+          (apply #'call-process (car cmd) nil nil nil (cdr cmd)))
+        (push (plist-put seg :intermediate dest-file) processed-audio)
+        (setq audio-index (1+ audio-index))))
+    (dolist (seg (cdr (assoc 'video sources)))
+      (let* ((source (plist-get seg :source))
+             (start-ms (or (plist-get seg :start-ms) 0))
+             (stop-ms (plist-get seg :stop-ms))
+             (duration-ms (when stop-ms (- stop-ms start-ms)))
+             (dest-file (expand-file-name (format "video_%04d.webm" video-index) temp-dir)))
+        (when source
+          (let ((cmd (append (list "ffmpeg" "-y"
+                                   (list "-ss" (format "%f" (/ start-ms 1000.0)))
+                                   "-i" (expand-file-name source))
+                             (when duration-ms (list "-t" (format "%f" (/ duration-ms 1000.0))))
+                             (list "-r" (number-to-string compile-media-output-video-fps) "-vf"
+                                   (format  "scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2"
+                                            compile-media-output-video-width
+                                            compile-media-output-video-height
+                                            compile-media-output-video-width
+                                            compile-media-output-video-height)
+                                   "-an" dest-file))))
+            (apply #'call-process (car cmd) nil nil nil (cdr cmd)))
+          (push (plist-put seg :intermediate dest-file) processed-video)
+          (setq video-index (1+ video-index)))))
+    (setq processed-audio (nreverse processed-audio))
+    (setq processed-video (nreverse processed-video))
+    (with-temp-file a-list
+      (insert
+       (mapconcat
+        (lambda (o)
+          (format "file '%s'"
+                  (plist-get o :intermediate)))
+        processed-audio "\n")))
+    (with-temp-file v-list
+      (insert
+       (mapconcat
+        (lambda (o)
+          (format "file '%s'"
+                  (plist-get o :intermediate)))
+        processed-video "\n")))
+    (list (cons 'audio processed-audio)
+          (cons 'audio-concat a-list)
+          (cons 'video processed-video)
+          (cons 'video-concat v-list))))
+
+(defun compile-media--adjust-subtitles-based-on-intermediate-files (sources intermediate)
+  (let ((original (plist-get (alist-get 'subtitles sources) :subtitles))
+        (msecs 0))
+    (seq-map-indexed
+     (lambda (o i)
+       (let ((file-duration (compile-media-get-file-duration-ms (plist-get o :intermediate)))
+             (caption (elt original i)))
+         (when (= (or file-duration 0) 0)
+           (message "Possible issue with %s - zero duration" (elt (assoc-default 'audio sources) i)))
+         (prog1 (list
+                 nil
+                 msecs
+                 (+ msecs file-duration)
+                 (elt caption 3)
+                 (unless (string= (elt caption 4) "")
+                   (elt caption 4)))
+           (setq msecs (+ msecs file-duration)))))
+     (alist-get 'audio intermediate))))
+
+(defun compile-media--concat-all (sources intermediate temp-dir output-file output-vtt &rest args)
+  "Splicing audio, video, and VTT using segment-indexed intermediate files."
+  (let* ((audio-segs (assoc-default 'audio intermediate))
+         (video-segs (assoc-default 'video intermediate))
+         (a-list (assoc-default 'audio-concat intermediate))
+         (v-list (assoc-default 'video-concat intermediate))
+         (adjusted (compile-media--adjust-subtitles-based-on-intermediate-files sources intermediate))
+         (current-time-ms 0)
+         (ext (file-name-extension output-file))
+         (codec-args
+          (cond
+           ;; Make this more configurable
+           ((string= ext "webm")
+            (list "-c:v" "libvpx-vp9" "-crf" compile-media-output-video-fps "-b:v" "0" "-c:a" "libopus" "-b:a" "128k"))
+           ((string= ext "opus")
+            (list "-vn" "-c:a" "libopus" "-b:a" "128k"))
+           ((string= ext "wav")
+            (list "-vn" "-c:a" "pcm_s16le"))
+           (t
+            (list "-c:v" "libx264" "-pix_fmt" "yuv420p" "-c:a" "libopus" "-b:a" "128k"))))
+         (command (append
+                   (list "ffmpeg" "-y")
+                   (list "-fflags"
+                         "+genpts")
+                   (when audio-segs (list "-f" "concat" "-safe" "0" "-i" (shell-quote-argument a-list)))
+                   (when video-segs (list "-f" "concat" "-safe" "0" "-i" (shell-quote-argument v-list)))
+                   ;; (when adjusted (list "-i" (shell-quote-argument output-vtt)))
+                   codec-args
+                   (list (shell-quote-argument output-file)))))
+    (when compile-media--debug (message "%s" (string-join command " ")))
+    (when adjusted
+      (subed-create-file output-vtt adjusted t))
+    (apply #'call-process
+           (car command)
+           nil (get-buffer-create "*ffmpeg*") nil (append (cdr command) args))))
+
+(defalias 'compile-media 'compile-media-sync)        ; Use the same version for now.
+
+
+(defun compile-media-sync (sources output-file &rest args)
   "Combine SOURCES into OUTPUT-FILE. Pass ARGS to ffmpeg.
 SOURCES should be a list of the form
 ((video (:source filename :start-ms start-ts :stop-ms stop-ts)
@@ -598,55 +789,17 @@ SOURCES should be a list of the form
  (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
  (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
         (:source filename :start-ms start-ts :stop-ms stop-ts))
- (subtitles (:source filename)))
+ (subtitles (:subtitles (subtitles in the form of subed-subtitle-list))))
 "
-  (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
-    (when (assoc-default 'subtitles sources)
-      (cond
-       ((plist-get (assoc-default 'subtitles sources) :source)
-
-        (funcall (if (plist-get (assoc-default 'subtitles sources) :temporary)
-                     #'rename-file
-                   #'copy-file)
-                 (plist-get (assoc-default 'subtitles sources) :source)
-                 (concat (file-name-sans-extension output-file) ".vtt")
-                 t))
-       ((plist-get (assoc-default 'subtitles sources) :subtitles)
-        (subed-create-file
-         (concat (file-name-sans-extension output-file) ".vtt")
-         (plist-get (assoc-default 'subtitles sources) :subtitles)))))
-    (with-current-buffer (get-buffer-create (format "*ffmpeg-%s*" output-file))
-      (when (process-live-p compile-media--conversion-process)
-        (quit-process compile-media--conversion-process))
-      (erase-buffer)
-      (insert ffmpeg-cmd "\n")
-      (setq compile-media--conversion-process
-            (start-process-shell-command "ffmpeg" (current-buffer) ffmpeg-cmd))
-      (set-process-coding-system compile-media--conversion-process 'utf-8-dos 'utf-8-dos)
-      (set-process-filter compile-media--conversion-process 'compile-media--process-filter-function)
-      (set-process-sentinel compile-media--conversion-process
-                            (lambda (process event)
-                              ;; (when (save-match-data (string-match "finished" event))
-                              ;;   (when subtitle-file (delete-file subtitle-file)))
-                              (when (plist-get args :sentinel)
-                                (funcall (plist-get args :sentinel) process event))))
-      (display-buffer (current-buffer)))))
-
-(defun compile-media-sync (sources output-file &rest args)
-  "Combine SOURCES into OUTPUT-FILE. Pass ARGS."
-  (let ((ffmpeg-cmd (compile-media-get-command sources output-file)))
-    (with-current-buffer (get-buffer-create (format "*ffmpeg-%s*" output-file))
-      (erase-buffer)
-      (insert ffmpeg-cmd "\n")
-      (shell-command ffmpeg-cmd (current-buffer))
-      (when (assoc-default 'subtitles sources)
-        (shell-command (format "ffmpeg -y -i %s %s.vtt"
-                               output-file
-                               (file-name-sans-extension output-file))
-                       (current-buffer)))
-      (when (plist-get args :sentinel)
-        (funcall (plist-get args :sentinel) nil "finished"))
-      (display-buffer (current-buffer)))))
+  (let* ((temp-dir (make-temp-file "compile-media" t))
+         (intermediate (compile-media--make-intermediate-files sources temp-dir)))
+    (apply #'compile-media--concat-all
+     sources intermediate
+     temp-dir
+     output-file
+     (concat (file-name-sans-extension output-file) ".vtt")
+     args)
+    (unless compile-media--debug (delete-directory temp-dir t))))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
