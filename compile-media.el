@@ -56,6 +56,10 @@
   :type 'integer
   :group 'compile-media)
 
+(defcustom compile-media-ffmpeg-audio-rate 48000 "Audio rate."
+  :type 'integer
+  :group 'compile-media)
+
 (defcustom compile-media-description-height 70
   "Number of pixels for top description in video.
 If nil, omit the description."
