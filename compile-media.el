@@ -640,8 +640,15 @@ Return ((audio . list-of-files) (video . list-of-files))."
              (dest-file (expand-file-name (format "audio-%04d.wav" audio-index) temp-dir))
              (clip
               (if (plist-get seg :trim)
-                  (format "[0:a]%s,asetpts=N/R/SB,aresample=async=1"
-                          (compile-media--format-trim (plist-get seg :trim)))
+                  (format "[0:a]aselect='%s',asetpts='N/SR/TB',aresample=async=1"
+                          (compile-media--format-trim
+                           (mapcar
+                            (lambda (pair)
+                              (mapcar
+                               (lambda (msec)
+                                 (- msec start-ms))
+                               pair))
+                            (plist-get seg :trim))))
                 "[0:a]aresample=async=1")))
         ;; handle silence
         (let ((cmd
