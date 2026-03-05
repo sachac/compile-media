@@ -607,6 +607,16 @@ If :include is not specified, include it for all the tracks."
     trims
     "")))
 
+(defun compile-media--make-concat-file (file list)
+  "Write FFmpeg concat directives to FILE for LIST."
+  (with-temp-file file
+    (insert
+     (mapconcat
+      (lambda (o)
+        (format "file '%s'"
+                (plist-get o :intermediate)))
+      list "\n"))))
+
 (defun compile-media--make-intermediate-files (sources temp-dir)
   "Write each segment of SOURCES to a file in TEMP-DIR for concatenation.
 SOURCES should be a list of the form
@@ -682,8 +692,9 @@ Return ((audio . list-of-files) (video . list-of-files))."
                   (list "-filter_complex"
                         (concat clip "[clip];[clip][1:a]concat=n=2:v=0:a=1[out]")))
                  (t (list "-filter_complex" (concat clip "[out]"))))
+                compile-media-ffmpeg-arguments
                 (list
-                 "-ar" (number-to-string compile-media-ffmpeg-audio-rate) "-ac" "2"
+                 "-ar" (number-to-string compile-media-ffmpeg-audio-rate)
                  "-map" "[out]"
                  "-map_metadata" "-1"
                  dest-file))))
@@ -714,20 +725,8 @@ Return ((audio . list-of-files) (video . list-of-files))."
           (setq video-index (1+ video-index)))))
     (setq processed-audio (nreverse processed-audio))
     (setq processed-video (nreverse processed-video))
-    (with-temp-file a-list
-      (insert
-       (mapconcat
-        (lambda (o)
-          (format "file '%s'"
-                  (plist-get o :intermediate)))
-        processed-audio "\n")))
-    (with-temp-file v-list
-      (insert
-       (mapconcat
-        (lambda (o)
-          (format "file '%s'"
-                  (plist-get o :intermediate)))
-        processed-video "\n")))
+    (compile-media--make-concat-file a-list processed-audio)
+    (compile-media--make-concat-file v-list processed-video)
     (list (cons 'audio processed-audio)
           (cons 'audio-concat a-list)
           (cons 'video processed-video)
@@ -741,7 +740,9 @@ Return ((audio . list-of-files) (video . list-of-files))."
        (let ((file-duration (compile-media-get-file-duration-ms (plist-get o :intermediate)))
              (caption (elt original i)))
          (when (= (or file-duration 0) 0)
-           (message "Possible issue with %s - zero duration" (elt (assoc-default 'audio sources) i)))
+           (message "Possible issue with %s %s - zero duration"
+                    (plist-get o :intermediate)
+                    (elt (assoc-default 'audio sources) i)))
          (prog1 (list
                  nil
                  msecs
@@ -780,6 +781,7 @@ Return ((audio . list-of-files) (video . list-of-files))."
                    (when video-segs (list "-f" "concat" "-safe" "0" "-i" (shell-quote-argument v-list)))
                    ;; (when adjusted (list "-i" (shell-quote-argument output-vtt)))
                    codec-args
+                   compile-media-ffmpeg-arguments
                    (list (shell-quote-argument output-file)))))
     (when compile-media--debug (message "%s" (string-join command " ")))
     (when adjusted
