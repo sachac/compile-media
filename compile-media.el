@@ -206,7 +206,7 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
                  ",")
                 output)))
 
-(defun compile-media--format-visuals-for-a-single-track (visuals output)
+(defun compile-media--format-visuals-for-a-single-track (visuals output &optional index-offset)
   "Format VISUALS for an ffmpeg command that outputs the OUTPUT pad.
 Return a plist of (:input ... :filter ... :input-count ...).
 This can be added to an ffmpeg command."
@@ -225,14 +225,16 @@ This can be added to an ffmpeg command."
                    (t 'compile-media--prepare-static-image))
                   (append
                    o
-                   (list :index i
+                   (list :index (+ i (or index-offset 0))
                          :filter
                          (concat
                           (if (and compile-media-output-video-fps  (> compile-media-output-video-fps 0))
                               (format "fps=%d," compile-media-output-video-fps)
                             "")
                           (compile-media--scale-filter o))))
-                  (if (= (length visuals) 1) output (format "r%d" i)))))
+                  (if (= (length visuals) 1)
+                      output
+                    (format "r%d" i)))))
               ((plist-get o :text)        ; drawtext
                (append o (list :filter (compile-media--description-filter o))))))
            visuals)))
@@ -278,7 +280,7 @@ Returns a plist with :input, :filter, and :output."
      :output
      nil)))
 
-(defun compile-media--format-visuals (visual-tracks &optional output)
+(defun compile-media--format-visuals (visual-tracks &optional output index-offset)
   "Determine the arguments for VISUALS.
 There may be multiple video tracks. If so, they are overlaid.
 If OUTPUT is specified, use that as the name of the output stream.
@@ -291,7 +293,7 @@ Returns a plist with :input, :filter, and :output.
         filter-list
         output-list
         video-track-output
-        (input-count 0)
+        (input-count (or index-offset 0))
         (video-tracks (seq-filter (lambda (o) (eq (car o) 'video)) visual-tracks))
         (text-track (assoc-default 'text visual-tracks))
         (open-captions-track (assoc-default 'subtitles visual-tracks)))
@@ -299,13 +301,17 @@ Returns a plist with :input, :filter, and :output.
     (when video-tracks
       (seq-map-indexed
        (lambda (visuals track-i)
-         (let* ((output (format "v-input-%d" track-i))
+         (let* ((output (if (= (length video-tracks) 1)
+                            output
+                          (format "v-input-%d" track-i)))
                 info filter input)
            ;; v-input-# will contain the visuals for that track
            (setq info
                  (pcase (car visuals)
-                   ('video (compile-media--format-visuals-for-a-single-track (cdr visuals)
-                                                                             output))
+                   ('video (compile-media--format-visuals-for-a-single-track
+                            (cdr visuals)
+                            output
+                            input-count))
                    ('text (compile-media--format-text-track (cdr visuals) output))))
            (setq input-list (append input-list (plist-get info :input)))
            (setq input-count (+ input-count (or (plist-get info :input-count) 0)))
@@ -313,25 +319,58 @@ Returns a plist with :input, :filter, and :output.
                  filter-list)
            ;; overlay as we go along
            (if (> track-i 0)
-               (push (format "[v-%s-%d][v-input-%d]overlay[v-overlaid-%d]"
+               (let ((overlay-params
+                      (delq
+                       nil
+                       (list
+                        (and
+                         (plist-get (cadr visuals) :output-pos)
+                         (format "x=%d:y=%d"
+                                 (elt (plist-get (cadr visuals) :output-pos) 0)
+                                 (elt (plist-get (cadr visuals) :output-pos) 1)))
+                        (and
+                         (or (plist-get (cadr visuals) :output-start-ms)
+                             (plist-get (cadr visuals) :output-stop-ms))
+                         (format
+                          "enable='%s'"
+                          (compile-media--between
+                           (list :start-ms
+                                 (compile-media-string-to-msecs
+                                  (plist-get (cadr visuals) :output-start-ms))
+                                 :stop-ms
+                                 (compile-media-string-to-msecs
+                                  (plist-get (cadr visuals) :output-stop-ms))))))))))
+                 (push
+                  (format "[v-%s-%d][v-input-%d]overlay%s[v-overlaid-%d]"
                              (if (= track-i 1)
                                  "input"
-                               "overlaid"))
-                     filter-list))))
+                            "overlaid")
+                          (1- track-i)
+                          track-i
+                          (if overlay-params
+                              (concat "=" (string-join overlay-params ":"))
+                            "")
+                          track-i)
+                  filter-list))
+             )))
        video-tracks))
     ;; at the end of this, we either have v-input-0 (for one track) or v-overlaid-# (len - 1)
     (setq video-track-output (pcase (length video-tracks)
                                (0 nil)
-                               (1 "v-input-0")
+                               (1 output)
                                (_ (format "v-overlaid-%d" (1- (length video-tracks))))))
     ;; no video input? use a black screen
     (if (and (null input-list) (or text-track open-captions-track))
-        (setq input-list `("-f" "lavfi" "-i" ,(format "color=size=%dx%d:color=black" compile-media-output-video-width compile-media-output-video-height))
+        (setq input-list
+              `("-f" "lavfi" "-i"
+                ,(format "color=size=%dx%d:color=black" compile-media-output-video-width compile-media-output-video-height))
               input-count (1+ input-count)))
     (when text-track
       (push
        (concat (if video-track-output (format "[%s]" video-track-output) "")
-               (plist-get (compile-media--format-open-captions open-captions-track "after-text") :filter))
+               (plist-get (compile-media--format-text-track
+                           text-track
+                           "after-text") :filter))
        filter-list)
       (setq video-track-output "after-text"))
     (when open-captions-track
@@ -349,38 +388,46 @@ Returns a plist with :input, :filter, and :output.
       )
     (list :input input-list
           :filter (when filter-list (string-join (reverse filter-list) ";"))
-          :output (when (and (not output) video-track-output) (list "-map:v" (format "[%s]" video-track-output)))
+          :output (when (and (not output) video-track-output)
+                    (list "-map:v" (format "[%s]" video-track-output)))
           :input-count input-count)))
 
 (defun compile-media--prepare-static-image (info &optional output)
   "Return arguments for static image in INFO."
-  (list
-   :input
-   (append (list "-loop" "1" "-t" (format "%.3f" (/ (or
+  (let ((duration-ms (or
                                                      (plist-get info :duration-ms)
                                                      (plist-get info :duration)
-                                                     (- (plist-get info :stop-ms)
-                                                        (plist-get info :start-ms)))
-                                                    1000.0)))
+                   (and (plist-get info :stop-ms)
+                        (plist-get info :start-ms)
+                        (- (compile-media-string-to-msecs (plist-get info :stop-ms))
+                           (compile-media-string-to-msecs (plist-get info :start-ms)))))))
+    (list
+     :input
+     (append (list "-loop" "1")
+             (when duration-ms
+               (list "-t" (format "%.3f" (/ (compile-media-string-to-msecs duration-ms) 1000.0))))
            (plist-get info :before-input)
            (list "-i" (plist-get info :source))
            (plist-get info :after-input))
    :filter
    (format "[%d:v]%s[%s]"
            (plist-get info :index)
-           (plist-get info :filter)
+             (or (plist-get info :filter) "scale")
            (or output
-               (format "r%d" (plist-get info :index))))))
+                 (format "r%d" (plist-get info :index)))))))
 
 (defun compile-media--prepare-animated-gif (info &optional output)
   "Return arguments for animated gif specified in INFO."
   (let ((gif-frames (compile-media-get-animated-gif-frames
                      (plist-get info :source)))
-        (duration (/ (or
+        (duration (/ (compile-media-string-to-msecs
+                      (or
                       (plist-get info :duration-ms)
                       (plist-get info :duration)
-                      (- (plist-get info :stop-ms)
-                         (plist-get info :start-ms)))
+                       (and (plist-get info :stop-ms)
+                            (plist-get info :start-ms)
+                            (- (compile-media-string-to-msecs (plist-get info :stop-ms))
+                               (compile-media-string-to-msecs (plist-get info :start-ms))))))
                      1000.0)))
     (list
      :input
@@ -408,23 +455,27 @@ Returns a plist with :input, :filter, and :output.
 (defun compile-media--between (info)
   (let* ((start-ms (plist-get info :start-ms))
          (stop-ms (plist-get info :stop-ms))
-         (start-s (and start-ms (/ start-ms 1000.0)))
-         (stop-s (and stop-ms (/ stop-ms 1000.0))))
+         (start-s (and start-ms (/ (compile-media-string-to-msecs start-ms) 1000.0)))
+         (stop-s (and stop-ms (/ (compile-media-string-to-msecs stop-ms) 1000.0))))
     (cond
      ((and start-ms stop-ms) (format "between(t,%.3f,%.3f)" start-s stop-s))
      (start-ms (format "gte(t,%.3f)" start-s))
      (stop-ms (format "lte(t,%.3f)" stop-s)))))
 
 (defun compile-media--prepare-video (info &optional output)
-  "Return ffmpeg arguments for videos specified by INFO."
+  "Return ffmpeg arguments for video specified by INFO."
   (let* ((start-ms (plist-get info :start-ms))
          (stop-ms (plist-get info :stop-ms))
-         (start-s (and start-ms (/ start-ms 1000.0)))
-         (stop-s (and stop-ms (/ stop-ms 1000.0)))
-         (duration (or (plist-get info :duration-ms) (plist-get info :duration)))
-         (video-duration (if duration (or (plist-get info :video-duration)
+         (start-s (and start-ms (/ (compile-media-string-to-msecs start-ms) 1000.0)))
+         (stop-s (and stop-ms (/ (compile-media-string-to-msecs stop-ms) 1000.0)))
+         (duration (or (plist-get info :duration-ms)
+                       (plist-get info :duration)))
+         (video-duration
+          (compile-media-string-to-msecs
+           (if duration
+               (or (plist-get info :video-duration)
                                           (compile-media-get-file-duration-ms
-                                           (plist-get info :source))))))
+                    (plist-get info :source)))))))
     (list
      :input
      (if (and (plist-get info :loop-if-shorter)
@@ -432,15 +483,35 @@ Returns a plist with :input, :filter, and :output.
          (list "-stream_loop" "-1" "-t" (/ duration 1000.0) "-i" (plist-get info :source))
        (delq nil
              (append
+              (when (plist-get info :original-start-ms)
+                (list "-ss" (format "%.3f"
+                                    (/
+                                     (compile-media-string-to-msecs
+                                      (plist-get info
+                                                 :original-start-ms))
+                                     1000.0))))
+              (when (plist-get info :original-stop-ms)
+                (list "-to" (format "%.3f"
+                                    (/
+                                     (compile-media-string-to-msecs
+                                      (plist-get info
+                                                 :original-stop-ms))
+                                     1000.0))))
               (list "-i" (plist-get info :source))
-              (if (plist-get info :same-edits)
+              (when (plist-get info :same-edits)
                   (list "-t"
                         (format
                          "%.3f"
                          (/
+                        (compile-media-string-to-msecs
                           (plist-get (car (last (plist-get info :same-edits)))
-                                     :stop-ms)
-                          1000.0)))))))
+                                    :stop-ms))
+                        1000.0))))
+              (when (plist-get info :overlay)
+                (seq-mapcat
+                 (lambda (overlay)
+                   (list "-i" (plist-get overlay :filename)))
+                 (plist-get info :overlay))))))
      :filter
      (format "[%d:v]%s[%s]"
              (plist-get info :index)
@@ -499,11 +570,18 @@ Returns a plist with :input, :filter, and :output.
   "Return the complex filter for scaling O."
   (let ((size (compile-media-video-dimensions (plist-get o :source))))
     ;; TODO: handle x1, y1, x2, y2, description
-    (if  (and
+    (cond
+     ((and
           (null (plist-get o :description))
           (or (null compile-media-output-video-width) (= (car size) compile-media-output-video-width))
           (or (null compile-media-output-video-height) (= (cdr size) compile-media-output-video-height)))
-        "scale"
+      "scale")
+     ((plist-get o :output-pos)
+      (let ((pos (plist-get o :output-pos)))
+        (format "scale=%d:%d"
+                (- (elt pos 2) (elt pos 0))
+                (- (elt pos 3) (elt pos 1)))))
+     (t
       (format "%sscale=%d:%d:force_original_aspect_ratio=decrease,setsar=sar=1,pad=%d:%d:(ow-iw)/2:%d+(oh-%d-ih)/2"
               (if (and (plist-get o :x1) (plist-get o :y1)
                        (plist-get o :x2) (plist-get o :y2))
@@ -520,7 +598,7 @@ Returns a plist with :input, :filter, and :output.
               compile-media-output-video-width
               compile-media-output-video-height
               (or (and (plist-get o :description) compile-media-description-height) 0)
-              (or (and (plist-get o :description) compile-media-description-height) 0)))))
+              (or (and (plist-get o :description) compile-media-description-height) 0))))))
 
 ;; (defun compile-media-ffmpeg-input (file start-ms stop-ms &optional frame-before)
 ;;   "Return the input arguments for FILE from START-MS to STOP-MS.
@@ -620,35 +698,20 @@ If :include is not specified, include it for all the tracks."
                 (plist-get o :intermediate)))
       list "\n"))))
 
-(defun compile-media--make-intermediate-files (sources temp-dir)
-  "Write each segment of SOURCES to a file in TEMP-DIR for concatenation.
-SOURCES should be a list of the form
-((video (:source filename :start-ms start-ts :stop-ms stop-ts)
-        (:source filename :start-ms start-ts :stop-ms stop-ts)
-        (:source filename :start-ms start-ts :stop-ms stop-ts))
- (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
- (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
-        (:source filename :start-ms start-ts :stop-ms stop-ts)))
-
-Other options:
-:pad-left number-of-seconds
-:pad-right number-of-seconds
-:trim ((start-ms stop-ms) ...)
-
-Also create the file needed for concatenating everything.
-Each audio and video segment should be a separate file for ease of combining.
-If CALLBACK is non-nil, call that once the output is finished.
-Return ((audio . list-of-files) (video . list-of-files))."
+(defun compile-media--process-intermediate-audio (sources temp-dir)
   (let ((audio-index 0)
-        (video-index 0)
-        (a-list (expand-file-name "audio_list.txt" temp-dir))
-        (v-list (expand-file-name "video_list.txt" temp-dir))
-        processed-audio
-        processed-video)
+        processed-audio)
     (dolist (seg (cdr (assoc 'audio sources)))
       (let* ((source (plist-get seg :source))
-             (start-ms (or (plist-get seg :start-ms) 0))
-             (stop-ms (plist-get seg :stop-ms))
+             (start-ms (compile-media-string-to-msecs
+                        (or
+                         (plist-get seg :original-start-ms)
+                         (plist-get seg :start-ms)
+                         0)))
+             (stop-ms (compile-media-string-to-msecs
+                       (or
+                        (plist-get seg :original-stop-ms)
+                        (plist-get seg :stop-ms))))
              (duration-ms (when stop-ms (- stop-ms start-ms)))
              (dest-file (expand-file-name (format "audio-%04d.wav" audio-index) temp-dir))
              (clip
@@ -705,35 +768,66 @@ Return ((audio . list-of-files) (video . list-of-files))."
           (apply #'call-process (car cmd) nil nil nil (cdr cmd)))
         (push (plist-put seg :intermediate dest-file) processed-audio)
         (setq audio-index (1+ audio-index))))
+    (nreverse processed-audio)))
+
+(defvar compile-media-dry-run nil)
+
+(defun compile-media--process-intermediate-video (sources temp-dir)
+  "Create intermediate video files for SOURCES."
+  (let ((video-index 0)
+        processed-video
+        commands)
     (dolist (seg (cdr (assoc 'video sources)))
-      (let* ((source (plist-get seg :source))
-             (start-ms (or (plist-get seg :start-ms) 0))
-             (stop-ms (plist-get seg :stop-ms))
-             (duration-ms (when stop-ms (- stop-ms start-ms)))
-             (dest-file (expand-file-name (format "video_%04d.webm" video-index) temp-dir)))
-        (when source
-          (let ((cmd (append (list "ffmpeg" "-y"
-                                   (list "-ss" (format "%f" (/ start-ms 1000.0)))
-                                   "-i" (expand-file-name source))
-                             (when duration-ms (list "-t" (format "%f" (/ duration-ms 1000.0))))
-                             (list "-r" (number-to-string compile-media-output-video-fps) "-vf"
-                                   (format  "scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2"
-                                            compile-media-output-video-width
-                                            compile-media-output-video-height
-                                            compile-media-output-video-width
-                                            compile-media-output-video-height)
-                                   "-an" dest-file))))
+      (let* ((dest-file (expand-file-name (format "video_%04d.webm" video-index) temp-dir))
+             (ffmpeg-args (compile-media--format-visuals-for-a-single-track
+                           (list seg)
+                           "v"))
+             (cmd
+              (append
+               (list "ffmpeg" "-y")
+               (plist-get ffmpeg-args :input)
+               (list
+                "-filter_complex"
+                (plist-get ffmpeg-args :filter))
+               (list "-map:v" "[v]")
+               (list dest-file)))
+             (ffmpeg-cmd (mapconcat 'shell-quote-argument cmd " ")))
+        (if compile-media-dry-run
+            (plist-put seg :command ffmpeg-cmd)
+          (message "%s" ffmpeg-cmd)
+          (kill-new ffmpeg-cmd)
             (apply #'call-process (car cmd) nil nil nil (cdr cmd)))
           (push (plist-put seg :intermediate dest-file) processed-video)
-          (setq video-index (1+ video-index)))))
-    (setq processed-audio (nreverse processed-audio))
-    (setq processed-video (nreverse processed-video))
+        (setq video-index (1+ video-index))))
+    (nreverse processed-video)))
+
+(defun compile-media--make-intermediate-files (sources temp-dir)
+  "Write each segment of SOURCES to a file in TEMP-DIR for concatenation.
+SOURCES should be a list of the form
+((video (:source filename :start-ms start-ts :stop-ms stop-ts
+         :overlay
+         ((:file filename :start-ms start-ts :stop-ms stop-ts)))
+        (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts))
+ (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
+ (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
+        (:source filename :start-ms start-ts :stop-ms stop-ts)))
+
+Other options:
+:pad-left number-of-seconds
+:pad-right number-of-seconds
+:trim ((start-ms stop-ms) ...)
+
+Also create the file needed for concatenating everything.
+Each audio and video segment should be a separate file for ease of combining.
+If CALLBACK is non-nil, call that once the output is finished.
+Return ((audio . list-of-files) (video . list-of-files))."
+  (let ((audio-index 0)
+        (a-list (expand-file-name "audio_list.txt" temp-dir))
+        (processed-audio (compile-media--process-intermediate-audio sources temp-dir)))
     (compile-media--make-concat-file a-list processed-audio)
-    (compile-media--make-concat-file v-list processed-video)
     (list (cons 'audio processed-audio)
-          (cons 'audio-concat a-list)
-          (cons 'video processed-video)
-          (cons 'video-concat v-list))))
+          (cons 'audio-concat a-list))))
 
 (defun compile-media--adjust-subtitles-based-on-intermediate-files (sources intermediate)
   (let ((original (plist-get (alist-get 'subtitles sources) :subtitles))
@@ -759,39 +853,55 @@ Return ((audio . list-of-files) (video . list-of-files))."
 (defun compile-media--concat-all (sources intermediate temp-dir output-file output-vtt &rest args)
   "Splicing audio, video, and VTT using segment-indexed intermediate files."
   (let* ((audio-segs (assoc-default 'audio intermediate))
-         (video-segs (assoc-default 'video intermediate))
          (a-list (assoc-default 'audio-concat intermediate))
-         (v-list (assoc-default 'video-concat intermediate))
          (adjusted (compile-media--adjust-subtitles-based-on-intermediate-files sources intermediate))
          (current-time-ms 0)
          (ext (file-name-extension output-file))
+         (visuals (compile-media--format-visuals sources nil (if a-list 1 0)))
          (codec-args
           (cond
            ;; Make this more configurable
            ((string= ext "webm")
-            (list "-c:v" "libvpx-vp9" "-crf" compile-media-output-video-fps "-b:v" "0" "-c:a" "libopus" "-b:a" "128k"))
+            (append
+             (list "-c:v" "libvpx-vp9")
+             (when compile-media-output-video-fps
+               (list "-crf" compile-media-output-video-fps))
+             (list "-b:v"  "0" "-c:a" "libopus" "-b:a" "128k")))
            ((string= ext "opus")
             (list "-vn" "-c:a" "libopus" "-b:a" "128k"))
            ((string= ext "wav")
             (list "-vn" "-c:a" "pcm_s16le"))
            (t
             (list "-c:v" "libx264" "-pix_fmt" "yuv420p" "-c:a" "libopus" "-b:a" "128k"))))
-         (command (append
+         (command
+          (append
                    (list "ffmpeg" "-y")
                    (list "-fflags"
                          "+genpts")
                    (when audio-segs (list "-f" "concat" "-safe" "0" "-i" (shell-quote-argument a-list)))
-                   (when video-segs (list "-f" "concat" "-safe" "0" "-i" (shell-quote-argument v-list)))
+           (when visuals
+             (append
+              (plist-get visuals :input)
+              (list
+               "-filter_complex"
+               (plist-get visuals :filter))
+              (or (plist-get visuals :output)
+                  (list "-map:v"
+                        "[v]"))))
+           (if a-list
+               (list "-map" "0:a"))
                    ;; (when adjusted (list "-i" (shell-quote-argument output-vtt)))
                    codec-args
                    compile-media-ffmpeg-arguments
-                   (list (shell-quote-argument output-file)))))
-    (when compile-media--debug (message "%s" (string-join command " ")))
-    (when adjusted
+           (list output-file))))
+    (when compile-media--debug (message "%s" (mapconcat 'shell-quote-argument command " ")))
+    (unless compile-media-dry-run
+      (when (and adjusted (featurep 'subed))
       (subed-create-file output-vtt adjusted t))
     (apply #'call-process
            (car command)
-           nil (get-buffer-create "*ffmpeg*") nil (append (cdr command) args))))
+             nil (get-buffer-create "*ffmpeg*") nil (append (cdr command) args)))
+    (mapconcat 'shell-quote-argument command " ")))
 
 (defalias 'compile-media 'compile-media-sync)        ; Use the same version for now.
 
@@ -799,7 +909,9 @@ Return ((audio . list-of-files) (video . list-of-files))."
 (defun compile-media-sync (sources output-file &rest args)
   "Combine SOURCES into OUTPUT-FILE. Pass ARGS to ffmpeg.
 SOURCES should be a list of the form
-((video (:source filename :start-ms start-ts :stop-ms stop-ts)
+((video (:source filename :start-ms start-ts :stop-ms stop-ts
+         :overlay
+         ((:file filename :start-ms start-ts :stop-ms stop-ts)))
         (:source filename :start-ms start-ts :stop-ms stop-ts)
         (:source filename :start-ms start-ts :stop-ms stop-ts))
  (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
@@ -807,23 +919,28 @@ SOURCES should be a list of the form
         (:source filename :start-ms start-ts :stop-ms stop-ts))
  (subtitles (:subtitles (subtitles in the form of subed-subtitle-list))))
 "
+  (setq output-file (expand-file-name output-file))
   (let* ((temp-dir (make-temp-file "compile-media" t))
-         (intermediate (compile-media--make-intermediate-files sources temp-dir)))
+         (intermediate (compile-media--make-intermediate-files sources temp-dir))
+         (process-result
     (apply #'compile-media--concat-all
      sources intermediate
      temp-dir
      output-file
      (concat (file-name-sans-extension output-file) ".vtt")
-     args)
-    (unless compile-media--debug (delete-directory temp-dir t))))
+                 args)))
+    (unless (or compile-media--debug compile-media-dry-run)
+      (delete-directory temp-dir t))
+    (when compile-media-dry-run
+      process-result)))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
   (mapconcat
    (lambda (o)
      (format "between(t,%.3f,%.3f)"
-             (/ (plist-get o :start-ms) 1000.0)
-             (/ (plist-get o :stop-ms) 1000.0)))
+             (/ (compile-media-string-to-msecs (plist-get o :start-ms)) 1000.0)
+             (/ (compile-media-string-to-msecs (plist-get o :stop-ms)) 1000.0)))
    current
    "+"))
 
@@ -858,7 +975,8 @@ SOURCES should be a list of the form
       (setq current
             (seq-take-while
              (lambda (o)
-               (prog1 (or (null previous)
+               (prog1
+                   (or (null previous)
                           (and
                            ;; same source, monotonically increasing in time
                            (stringp (plist-get o :source))
@@ -866,7 +984,8 @@ SOURCES should be a list of the form
                            (string= (plist-get o :source) (plist-get previous :source))
                            (plist-get o :start-ms)
                            (plist-get previous :stop-ms)
-                           (>= (plist-get o :start-ms) (plist-get previous :stop-ms))))
+                        (>= (compile-media-string-to-msecs (plist-get o :start-ms))
+                            (compile-media-string-to-msecs (plist-get previous :stop-ms)))))
                  (setq previous o)))
              temp))
       (setq temp (seq-drop temp (length current)))
@@ -886,9 +1005,11 @@ SOURCES should be a list of the form
           ((and
             (plist-get val :start-ms)
             (plist-get (car prev) :stop-ms)
-            (= (plist-get val :start-ms)
-               (1+ (plist-get (car prev) :stop-ms))))
-           (plist-put (car prev) :stop-ms (plist-get val :stop-ms))
+            (= (compile-media-string-to-msecs (plist-get val :start-ms))
+               (1+ (compile-media-string-to-msecs (plist-get (car prev) :stop-ms)))))
+           (plist-put (car prev)
+                      :stop-ms
+                      (compile-media-string-to-msecs (plist-get val :stop-ms)))
            prev)
           (t
            (cons val prev))))
@@ -903,7 +1024,8 @@ START-INPUT should have the numerical index for the starting input file."
   (when list
     (let ((silence-counter 0)
           (groups
-           (mapcar (lambda (current)
+           (mapcar
+            (lambda (current)
                      (if (eq 'silence (plist-get (car current) :source))
                          (list
                           :silence t
@@ -915,8 +1037,14 @@ START-INPUT should have the numerical index for the starting input file."
                         (format "aselect='%s',asetpts='N/SR/TB'"
                                 (mapconcat
                                  (lambda (o)
-                                   (let ((start-s (and (plist-get o :start-ms) (/ (plist-get o :start-ms) 1000.0)))
-                                         (stop-s (and (plist-get o :stop-ms) (/ (plist-get o :stop-ms) 1000.0))))
+                            (let ((start-s
+                                   (and (plist-get o :start-ms)
+                                        (/ (compile-media-string-to-msecs (plist-get o :start-ms))
+                                           1000.0)))
+                                  (stop-s
+                                   (and (plist-get o :stop-ms)
+                                        (/ (compile-media-string-to-msecs (plist-get o :stop-ms))
+                                           1000.0))))
                                      (cond
                                       ((and start-s stop-s) (format "between(t,%.3f,%.3f)" start-s stop-s))
                                       (start-s (format "gte(t,%.3f)" start-s))
