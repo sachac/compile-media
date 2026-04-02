@@ -207,6 +207,9 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
                 output)))
 
 (defun compile-media--format-visuals-for-a-single-track (visuals output)
+  "Format VISUALS for an ffmpeg command that outputs the OUTPUT pad.
+Return a plist of (:input ... :filter ... :input-count ...).
+This can be added to an ffmpeg command."
   (let* (input-list
          filter-list
          (info
