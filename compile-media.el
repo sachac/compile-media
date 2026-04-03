@@ -47,7 +47,7 @@
   :group 'compile-media
   :type 'string)
 
-(defcustom compile-media-ffmpeg-arguments '("-c:v" "vp8" "-vsync" "2" "-b:v" "800k" "-auto-alt-ref" "0")
+(defcustom compile-media-ffmpeg-arguments '("-vsync" "2" "-b:v" "800k" "-auto-alt-ref" "0")
   "Extra arguments to pass to FFmpeg."
   :type '(repeat string)
   :group 'compile-media)
@@ -70,6 +70,8 @@ If nil, omit the description."
 (defcustom compile-media-output-video-height 720 "Video will be the specified number of pixels tall."
   :type 'integer :group 'compile-media)
 (defcustom compile-media-output-video-fps nil "If non-nil and greater than 0, use these frames per second."
+  :type 'integer :group 'compile-media)
+(defcustom compile-media-output-video-crf nil "If non-nil and greater than 0, use this crf."
   :type 'integer :group 'compile-media)
 (defcustom compile-media-description-drawtext-filter-params "fontcolor=white:x=5:y=5:fontsize=40"
   "Additional filter arguments for drawing the visual description."
@@ -400,7 +402,11 @@ Returns a plist with :input, :filter, and :output.
                    (and (plist-get info :stop-ms)
                         (plist-get info :start-ms)
                         (- (compile-media-string-to-msecs (plist-get info :stop-ms))
-                           (compile-media-string-to-msecs (plist-get info :start-ms)))))))
+                           (compile-media-string-to-msecs (plist-get info :start-ms))))
+                   (and (plist-get info :output-stop-ms)
+                        (plist-get info :output-start-ms)
+                        (- (compile-media-string-to-msecs (plist-get info :output-stop-ms))
+                           (compile-media-string-to-msecs (plist-get info :output-start-ms)))))))
     (list
      :input
      (append (list "-loop" "1")
@@ -822,6 +828,7 @@ Also create the file needed for concatenating everything.
 Each audio and video segment should be a separate file for ease of combining.
 If CALLBACK is non-nil, call that once the output is finished.
 Return ((audio . list-of-files) (video . list-of-files))."
+  ;; TODO: don't concat if there's only one audio file
   (let ((audio-index 0)
         (a-list (expand-file-name "audio_list.txt" temp-dir))
         (processed-audio (compile-media--process-intermediate-audio sources temp-dir)))
@@ -864,11 +871,11 @@ Return ((audio . list-of-files) (video . list-of-files))."
            ((string= ext "webm")
             (append
              (list "-c:v" "libvpx-vp9")
-             (when compile-media-output-video-fps
-               (list "-crf" compile-media-output-video-fps))
-             (list "-b:v"  "0" "-c:a" "libopus" "-b:a" "128k")))
+             (when compile-media-output-video-crf
+               (list "-crf" compile-media-output-video-crf))
+             (list "-b:v"  "0" "-c:a" "libopus" "-b:a" "64k")))
            ((string= ext "opus")
-            (list "-vn" "-c:a" "libopus" "-b:a" "128k"))
+            (list "-vn" "-c:a" "libopus" "-b:a" "64k"))
            ((string= ext "wav")
             (list "-vn" "-c:a" "pcm_s16le"))
            (t
