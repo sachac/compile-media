@@ -13,6 +13,19 @@
 																			"v")
 		'(:filter "drawtext=fontcolor=white:x=5:y=5:fontsize=40:text=Hello:enable='between(t,0.000,0.100)',drawtext=fontcolor=white:x=5:y=5:fontsize=40:text=world:enable='between(t,0.100,0.200)'[v]"))))
 
+(ert-deftest compile-media-expand-combined-sources ()
+  "Tests `compile-media-expand-combined-sources'."
+  (should (equal (compile-media-expand-combined-sources
+                  '((combined (:source "test.webm" :original-start-ms 1000 :original-stop-ms 2000))
+                    (combined (:source "test2.webm"))))
+                 '((video
+                    (:source "test.webm" :original-start-ms 1000
+                             :original-stop-ms 2000))
+                   (audio
+                    (:source "test.webm" :original-start-ms 1000
+                             :original-stop-ms 2000))
+                   (video (:source "test2.webm"))
+                   (audio (:source "test2.webm"))))))
 
 (ert-deftest compile-media--process-intermediate-video ()
   "Tests `compile-media--process-intermediate-video'."

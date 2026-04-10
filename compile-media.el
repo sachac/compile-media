@@ -47,7 +47,7 @@
   :group 'compile-media
   :type 'string)
 
-(defcustom compile-media-ffmpeg-arguments '("-vsync" "2" "-b:v" "800k" "-auto-alt-ref" "0")
+(defcustom compile-media-ffmpeg-arguments '("-auto-alt-ref" "0")
   "Extra arguments to pass to FFmpeg."
   :type '(repeat string)
   :group 'compile-media)
@@ -76,6 +76,20 @@ If nil, omit the description."
 (defcustom compile-media-description-drawtext-filter-params "fontcolor=white:x=5:y=5:fontsize=40"
   "Additional filter arguments for drawing the visual description."
   :type 'string :group 'compile-media)
+(defvar compile-media-ffmpeg-command-transforms '(compile-media-transform-ffmpeg-hwaccel)
+  "Functions to run on the ffmpeg command before executing it.
+This should take a list and return a list.")
+(defvar compile-media-ffmpeg-extension-arguments
+  '(("webm" "-c:v libvpx-vp9 -b:v 0 -c:a libopus -b:a 64k")
+    ("opus" "-vn -c:a libopus -b:a 64k")
+    ("wav" "-vn -c:a pcm_s16le")
+    ("." "-c:v  libx264 -pix_fmt yuv420p -c:a libopus -b:a 128k"))
+  "List of (extension-regexp argument-string).
+First entry that matches the output filename extension is used.
+Use this to enable hardware encoding. For example, add a row at the top with:
+(\"mp4\" \"-c:v hevc_nvenc -preset p4 -cq 24 -b:v 0 -c:a aac -b:a 64 -hwaccel cuda\")
+to use Nvidia acceleration.")
+
 (defvar compile-media--conversion-process nil "Process for compiling.")
 
 (defun compile-media-timestamp-to-msecs (time-string)
@@ -208,6 +222,10 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
                  ",")
                 output)))
 
+(defvar compile-media-video-extensions '("mp4" "webm" "mkv" "mov"))
+(defvar compile-media-image-extensions '("png" "jpg" "jpeg" "svg"))
+
+
 (defun compile-media--format-visuals-for-a-single-track (visuals output &optional index-offset)
   "Format VISUALS for an ffmpeg command that outputs the OUTPUT pad.
 Return a plist of (:input ... :filter ... :input-count ...).
@@ -219,12 +237,14 @@ This can be added to an ffmpeg command."
            (lambda (o i)
              (cond
               ((plist-get o :source)  ; visual specified
-               (let* ((source (plist-get o :source)))
+               (let* ((source (plist-get o :source))
+                      (ext (file-name-extension source)))
                  (funcall
                   (cond
-                   ((string-match "mp4\\|webm\\|mkv" source) 'compile-media--prepare-video)
+                   ((member ext compile-media-video-extensions) 'compile-media--prepare-video)
                    ((string-match "gif$" source) 'compile-media--prepare-animated-gif)
-                   (t 'compile-media--prepare-static-image))
+                   ((member ext compile-media-image-extensions) 'compile-media--prepare-static-image)
+                   (t (error "Unknown extension %s for %s" ext source)))
                   (append
                    o
                    (list :index (+ i (or index-offset 0))
@@ -396,17 +416,14 @@ Returns a plist with :input, :filter, and :output.
 
 (defun compile-media--prepare-static-image (info &optional output)
   "Return arguments for static image in INFO."
-  (let ((duration-ms (or
+  (let ((duration-ms
+         (or
                                                      (plist-get info :duration-ms)
                                                      (plist-get info :duration)
                    (and (plist-get info :stop-ms)
                         (plist-get info :start-ms)
                         (- (compile-media-string-to-msecs (plist-get info :stop-ms))
-                           (compile-media-string-to-msecs (plist-get info :start-ms))))
-                   (and (plist-get info :output-stop-ms)
-                        (plist-get info :output-start-ms)
-                        (- (compile-media-string-to-msecs (plist-get info :output-stop-ms))
-                           (compile-media-string-to-msecs (plist-get info :output-start-ms)))))))
+                  (compile-media-string-to-msecs (plist-get info :start-ms)))))))
     (list
      :input
      (append (list "-loop" "1")
@@ -734,6 +751,7 @@ If :include is not specified, include it for all the tracks."
                 "[0:a]aresample=async=1")))
         ;; handle silence
         (let ((cmd
+               (compile-media--transform-ffmpeg-command
                (append
                 (list "ffmpeg" "-y")
                 (list
@@ -769,7 +787,7 @@ If :include is not specified, include it for all the tracks."
                  "-ar" (number-to-string compile-media-ffmpeg-audio-rate)
                  "-map" "[out]"
                  "-map_metadata" "-1"
-                 dest-file))))
+                  dest-file)))))
           (when compile-media--debug (message "%s" (string-join cmd " ")))
           (apply #'call-process (car cmd) nil nil nil (cdr cmd)))
         (push (plist-put seg :intermediate dest-file) processed-audio)
@@ -789,6 +807,7 @@ If :include is not specified, include it for all the tracks."
                            (list seg)
                            "v"))
              (cmd
+              (compile-media--transform-ffmpeg-command
               (append
                (list "ffmpeg" "-y")
                (plist-get ffmpeg-args :input)
@@ -796,7 +815,7 @@ If :include is not specified, include it for all the tracks."
                 "-filter_complex"
                 (plist-get ffmpeg-args :filter))
                (list "-map:v" "[v]")
-               (list dest-file)))
+                (list dest-file))))
              (ffmpeg-cmd (mapconcat 'shell-quote-argument cmd " ")))
         (if compile-media-dry-run
             (plist-put seg :command ffmpeg-cmd)
@@ -866,27 +885,19 @@ Return ((audio . list-of-files) (video . list-of-files))."
          (ext (file-name-extension output-file))
          (visuals (compile-media--format-visuals sources nil (if a-list 1 0)))
          (codec-args
-          (cond
-           ;; Make this more configurable
-           ((string= ext "webm")
-            (append
-             (list "-c:v" "libvpx-vp9")
-             (when compile-media-output-video-crf
-               (list "-crf" compile-media-output-video-crf))
-             (list "-b:v"  "0" "-c:a" "libopus" "-b:a" "64k")))
-           ((string= ext "opus")
-            (list "-vn" "-c:a" "libopus" "-b:a" "64k"))
-           ((string= ext "wav")
-            (list "-vn" "-c:a" "pcm_s16le"))
-           (t
-            (list "-c:v" "libx264" "-pix_fmt" "yuv420p" "-c:a" "libopus" "-b:a" "128k"))))
+          (split-string
+           (cadr
+            (seq-find (lambda (o) (string-match (car o) ext))
+                      compile-media-ffmpeg-extension-arguments))
+           " "))
          (command
+          (compile-media--transform-ffmpeg-command
           (append
                    (list "ffmpeg" "-y")
                    (list "-fflags"
                          "+genpts")
                    (when audio-segs (list "-f" "concat" "-safe" "0" "-i" (shell-quote-argument a-list)))
-           (when visuals
+            (when (and visuals (plist-get visuals :input))
              (append
               (plist-get visuals :input)
               (list
@@ -900,7 +911,8 @@ Return ((audio . list-of-files) (video . list-of-files))."
                    ;; (when adjusted (list "-i" (shell-quote-argument output-vtt)))
                    codec-args
                    compile-media-ffmpeg-arguments
-           (list output-file))))
+            (list "-shortest")
+            (list output-file)))))
     (when compile-media--debug (message "%s" (mapconcat 'shell-quote-argument command " ")))
     (unless compile-media-dry-run
       (when (and adjusted (featurep 'subed))
@@ -912,21 +924,46 @@ Return ((audio . list-of-files) (video . list-of-files))."
 
 (defalias 'compile-media 'compile-media-sync)        ; Use the same version for now.
 
+(defun compile-media-expand-combined-sources (sources)
+  "Expand combined SOURCES into separate audio and video tracks.
+
+Ex:
+
+((combined (:source filename :original-start-ms 1000 :original-stop-ms 2000)))
+
+becomes
+
+((video (:source filename :original-start-ms 1000 :original-stop-ms 2000))
+ (audio (:source filename :original-start-ms 1000 :original-stop-ms 2000)))"
+  (seq-mapcat
+   (lambda (source)
+     (if (eq (car source) 'combined)
+         (mapcar
+          (lambda (track-type)
+            (cons track-type (cdr source)))
+          '(video audio))
+       (list source)))
+   sources))
 
 (defun compile-media-sync (sources output-file &rest args)
   "Combine SOURCES into OUTPUT-FILE. Pass ARGS to ffmpeg.
 SOURCES should be a list of the form
-((video (:source filename :start-ms start-ts :stop-ms stop-ts
-         :overlay
-         ((:file filename :start-ms start-ts :stop-ms stop-ts)))
-        (:source filename :start-ms start-ts :stop-ms stop-ts)
-        (:source filename :start-ms start-ts :stop-ms stop-ts))
+((video
+ (:source filename)
+ (:source filename :original-start-ms start-ts :original-stop-ms stop-ts))
  (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
  (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
         (:source filename :start-ms start-ts :stop-ms stop-ts))
  (subtitles (:subtitles (subtitles in the form of subed-subtitle-list))))
+
+This example shows how to overlay something on top of something else. Combined means video + audio.
+
+((combined (:source filename))
+ (combined (:source filename :output-position (x1 y1 x2 y2) :output-start-ms start-ms :output-stop-ms stop-ms)))
+
 "
   (setq output-file (expand-file-name output-file))
+  (setq sources (compile-media-expand-combined-sources sources))
   (let* ((temp-dir (make-temp-file "compile-media" t))
          (intermediate (compile-media--make-intermediate-files sources temp-dir))
          (process-result
@@ -1204,6 +1241,21 @@ If THROW-ERROR is non-nil, throw an error if invalid."
                          (- duration
                             (or (car (last last-frames)) duration))
                          duration)))))
+
+(defun compile-media--transform-ffmpeg-command (command)
+  "Run `compile-media-ffmpeg-command-transforms' on COMMAND."
+  (seq-reduce
+   (lambda (prev cur)
+     (funcall cur prev))
+   compile-media-ffmpeg-command-transforms
+   command))
+
+(defun compile-media-transform-ffmpeg-hwaccel (args)
+  "Use -hwaccel cuda if using an nvenc."
+  (if (member "hevc_nvenc" args)
+      (append (list (car args) "-hwaccel" "cuda")
+              (cdr args))
+    args))
 
 (provide 'compile-media)
 ;;; compile-media.el ends here
