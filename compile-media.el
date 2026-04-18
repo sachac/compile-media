@@ -914,7 +914,7 @@ Return ((audio . list-of-files) (video . list-of-files))."
                    codec-args
                    compile-media-ffmpeg-arguments
             (list "-shortest")
-            (list output-file)))))
+            (list (expand-file-name output-file))))))
     (when compile-media--debug (message "%s" (mapconcat 'shell-quote-argument command " ")))
     (unless compile-media-dry-run
       (when (and adjusted (featurep 'subed))
