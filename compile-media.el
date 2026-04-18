@@ -806,7 +806,7 @@ If :include is not specified, include it for all the tracks."
       (let* ((dest-file (expand-file-name (format "video_%04d.webm" video-index) temp-dir))
              (ffmpeg-args (compile-media--format-visuals-for-a-single-track
                            (list seg)
-                           "v"))
+                           "v-output"))
              (cmd
               (compile-media--transform-ffmpeg-command
               (append
@@ -815,7 +815,7 @@ If :include is not specified, include it for all the tracks."
                (list
                 "-filter_complex"
                 (plist-get ffmpeg-args :filter))
-               (list "-map:v" "[v]")
+               (list "-map:v" (or (plist-get ffmpeg-args :output) "[v-output]"))
                 (list dest-file))))
              (ffmpeg-cmd (mapconcat 'shell-quote-argument cmd " ")))
         (if compile-media-dry-run
