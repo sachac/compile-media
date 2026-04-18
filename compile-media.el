@@ -83,7 +83,8 @@ This should take a list and return a list.")
   '(("webm" "-c:v libvpx-vp9 -b:v 0 -c:a libopus -b:a 64k")
     ("opus" "-vn -c:a libopus -b:a 64k")
     ("wav" "-vn -c:a pcm_s16le")
-    ("." "-c:v  libx264 -pix_fmt yuv420p -c:a libopus -b:a 128k"))
+		("mp4" "-c:v libx264")
+    ("." "-c:v libx264 -pix_fmt yuv420p -c:a libopus -b:a 128k"))
   "List of (extension-regexp argument-string).
 First entry that matches the output filename extension is used.
 Use this to enable hardware encoding. For example, add a row at the top with:
