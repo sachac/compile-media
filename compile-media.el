@@ -319,7 +319,10 @@ Returns a plist with :input, :filter, and :output.
         (input-count (or index-offset 0))
         (video-tracks (seq-filter (lambda (o) (eq (car o) 'video)) visual-tracks))
         (text-track (assoc-default 'text visual-tracks))
-        (open-captions-track (assoc-default 'subtitles visual-tracks)))
+        (open-captions-track
+         (and
+          (plist-get (cadr (assoc 'subtitles visual-tracks)) :open-captions)
+          (assoc-default 'subtitles visual-tracks))))
     ;; TODO process video-tracks, then draw text on top
     (when video-tracks
       (seq-map-indexed
