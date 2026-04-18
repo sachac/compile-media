@@ -833,9 +833,7 @@ If :include is not specified, include it for all the tracks."
 (defun compile-media--make-intermediate-files (sources temp-dir)
   "Write each segment of SOURCES to a file in TEMP-DIR for concatenation.
 SOURCES should be a list of the form
-((video (:source filename :start-ms start-ts :stop-ms stop-ts
-         :overlay
-         ((:file filename :start-ms start-ts :stop-ms stop-ts)))
+((video (:source filename :start-ms start-ts :stop-ms stop-ts)
         (:source filename :start-ms start-ts :stop-ms stop-ts)
         (:source filename :start-ms start-ts :stop-ms stop-ts))
  (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
@@ -953,8 +951,8 @@ becomes
   "Combine SOURCES into OUTPUT-FILE. Pass ARGS to ffmpeg.
 SOURCES should be a list of the form
 ((video
- (:source filename)
- (:source filename :original-start-ms start-ts :original-stop-ms stop-ts))
+  (:source filename)
+  (:source filename :original-start-ms start-ts :original-stop-ms stop-ts))
  (video (:text \"text text\" :start-ms start-ts :stop-ms stop-ts))
  (audio (:source filename :start-ms start-ts :stop-ms stop-ts)
         (:source filename :start-ms start-ts :stop-ms stop-ts))
