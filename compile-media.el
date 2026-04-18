@@ -1259,5 +1259,21 @@ If THROW-ERROR is non-nil, throw an error if invalid."
               (cdr args))
     args))
 
+(defun compile-media-get-video-frame (video msecs output-file)
+	"Write a frame of VIDEO at MSECS to OUTPUT-FILE."
+	(interactive (list (read-file-name "Video: ")
+										 (read-string "Time: ")
+										 (read-file-name "Output image: ")))
+	(let ((args (list "-y"
+										"-ss"
+										(compile-media-msecs-to-timestamp (compile-media-string-to-msecs msecs))
+										"-i"
+										(expand-file-name video)
+										"-frames:v"
+										"1"
+										(expand-file-name output-file))))
+		(apply #'call-process compile-media-ffmpeg-executable nil nil nil
+					 args)))
+
 (provide 'compile-media)
 ;;; compile-media.el ends here
