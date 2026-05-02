@@ -226,6 +226,11 @@ If non-nil, check MS-BUFFER milliseconds around MSECS."
 (defvar compile-media-video-extensions '("mp4" "webm" "mkv" "mov"))
 (defvar compile-media-image-extensions '("png" "jpg" "jpeg" "svg"))
 
+(defun compile-media-maybe-expand-filename (s)
+	"Expand S as a file name unless it looks like a URL."
+	(if (or (not (stringp s)) (string-match "^[a-z]+://" s))
+			s
+		(expand-file-name s)))
 
 (defun compile-media--format-visuals-for-a-single-track (visuals output &optional index-offset)
   "Format VISUALS for an ffmpeg command that outputs the OUTPUT pad.
@@ -237,8 +242,8 @@ This can be added to an ffmpeg command."
           (seq-map-indexed
            (lambda (o i)
              (cond
-              ((plist-get o :source)  ; visual specified
-               (let* ((source (plist-get o :source))
+              ((plist-get o :source)		; visual specified
+               (let* ((source (compile-media-maybe-expand-filename (plist-get o :source)))
                       (ext (file-name-extension source)))
                  (funcall
                   (cond
@@ -291,7 +296,7 @@ Returns a plist with :input, :filter, and :output."
      nil
      :filter
      (format "subtitles=%s:force_style='Fontname=%s,Fontsize=%s,PrimaryColour=%s,OutlineColour=%s,BorderStyle=3,Outline=3,Alignment=%s,Bold=%s,BackColour=%s'[%s]"
-             (plist-get (car subtitles) :source)
+             (compile-media-maybe-expand-filename (plist-get (car subtitles) :source))
              font-name
              font-size
              fg-color
@@ -434,7 +439,7 @@ Returns a plist with :input, :filter, and :output.
              (when duration-ms
                (list "-t" (format "%.3f" (/ (compile-media-string-to-msecs duration-ms) 1000.0))))
            (plist-get info :before-input)
-           (list "-i" (plist-get info :source))
+           (list "-i" (compile-media-maybe-expand-filename (plist-get info :source)))
            (plist-get info :after-input))
    :filter
    (format "[%d:v]%s[%s]"
@@ -446,7 +451,7 @@ Returns a plist with :input, :filter, and :output.
 (defun compile-media--prepare-animated-gif (info &optional output)
   "Return arguments for animated gif specified in INFO."
   (let ((gif-frames (compile-media-get-animated-gif-frames
-                     (plist-get info :source)))
+                     (compile-media-maybe-expand-filename (plist-get info :source))))
         (duration (/ (compile-media-string-to-msecs
                       (or
                       (plist-get info :duration-ms)
@@ -459,15 +464,15 @@ Returns a plist with :input, :filter, and :output.
     (list
      :input
      (if (and (plist-get info :loop-if-shorter)
-              (< (compile-media-get-file-duration-ms (plist-get info :source))
+              (< (compile-media-get-file-duration-ms (compile-media-maybe-expand-filename (plist-get info :source)))
                  (* duration 1000)))
          (list "-stream_loop" "-1"
                "-t"
                duration
                "-i"
-               (plist-get info :source))
+               (compile-media-maybe-expand-filename (plist-get info :source)))
        (list "-r" (format "%.3f" (/ gif-frames duration)) "-i"
-             (plist-get info :source)))
+             (compile-media-maybe-expand-filename (plist-get info :source))))
      :filter
      ;; (format "-i %s" filename)
      (format "[%d:v]%s[%s]"
@@ -502,12 +507,12 @@ Returns a plist with :input, :filter, and :output.
            (if duration
                (or (plist-get info :video-duration)
                                           (compile-media-get-file-duration-ms
-                    (plist-get info :source)))))))
+																					 (compile-media-maybe-expand-filename (plist-get info :source))))))))
     (list
      :input
      (if (and (plist-get info :loop-if-shorter)
               (< video-duration duration))
-         (list "-stream_loop" "-1" "-t" (/ duration 1000.0) "-i" (plist-get info :source))
+         (list "-stream_loop" "-1" "-t" (/ duration 1000.0) "-i" (compile-media-maybe-expand-filename (plist-get info :source)))
        (delq nil
              (append
               (when (plist-get info :original-start-ms)
@@ -524,7 +529,7 @@ Returns a plist with :input, :filter, and :output.
                                       (plist-get info
                                                  :original-stop-ms))
                                      1000.0))))
-              (list "-i" (plist-get info :source))
+              (list "-i" (compile-media-maybe-expand-filename (plist-get info :source)))
               (when (plist-get info :same-edits)
                   (list "-t"
                         (format
@@ -595,7 +600,7 @@ Returns a plist with :input, :filter, and :output.
 
 (defun compile-media--scale-filter (o)
   "Return the complex filter for scaling O."
-  (let ((size (compile-media-video-dimensions (plist-get o :source))))
+  (let ((size (compile-media-video-dimensions (compile-media-maybe-expand-filename (plist-get o :source)))))
     ;; TODO: handle x1, y1, x2, y2, description
     (cond
      ((and
@@ -729,7 +734,7 @@ If :include is not specified, include it for all the tracks."
   (let ((audio-index 0)
         processed-audio)
     (dolist (seg (cdr (assoc 'audio sources)))
-      (let* ((source (plist-get seg :source))
+      (let* ((source (compile-media-maybe-expand-filename (plist-get seg :source)))
              (start-ms (compile-media-string-to-msecs
                         (or
                          (plist-get seg :original-start-ms)
@@ -1193,7 +1198,7 @@ START-INPUT should have the numerical index for the starting input file."
           (seq-mapcat
            (lambda (track)
              (mapcar
-              (lambda (entry) (shell-quote-argument (plist-get entry :source)))
+              (lambda (entry) (shell-quote-argument (compile-media-maybe-expand-filename (plist-get entry :source))))
               (seq-filter (lambda (entry) (plist-get entry :temporary))
                           (cdr track))))
            sources)
