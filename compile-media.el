@@ -1264,19 +1264,45 @@ If THROW-ERROR is non-nil, throw an error if invalid."
               (cdr args))
     args))
 
-(defun compile-media-get-video-frame (video msecs output-file)
-	"Write a frame of VIDEO at MSECS to OUTPUT-FILE."
+(eval-when-compile 'cl-macs)
+
+(defun compile-media-get-video-frame (video msecs output-file &optional specs)
+	"Write a frame of VIDEO at MSECS to OUTPUT-FILE.
+SPECS can specify additional operations, such as:
+(:crop (x1 y1 x2 y2) ...)"
 	(interactive (list (read-file-name "Video: ")
 										 (read-string "Time: ")
 										 (read-file-name "Output image: ")))
-	(let ((args (list "-y"
-										"-ss"
-										(compile-media-msecs-to-timestamp (compile-media-string-to-msecs msecs))
-										"-i"
-										(expand-file-name video)
-										"-frames:v"
-										"1"
-										(expand-file-name output-file))))
+	(when (stringp (plist-get specs :crop))
+		(plist-put specs :crop
+							 (mapcar 'string-to-number
+											 (split-string (plist-get specs :crop) " "))))
+	(let ((args (append
+							 (if (plist-get specs :keyframe)
+									 (list "-skip_frame" "nokey"))
+							 (list "-y"
+										 "-ss"
+										 (compile-media-msecs-to-timestamp (compile-media-string-to-msecs msecs))
+										 "-i"
+										 (expand-file-name video))
+							 (and
+								(plist-get specs :crop)
+								(list "-vf"
+											(if (plist-get specs :crop)
+													(cl-destructuring-bind (x1 y1 x2 y2)
+															(plist-get specs :crop)
+														(format "crop=%d:%d:%d:%d"
+																		(- x2 x1)
+																		(- y2 y1)
+																		x1
+																		y1))
+												(error "Unknown spec"))))
+							 (list
+								"-frames:v"
+								"1"
+								"-q:v"
+								"2"
+								(expand-file-name output-file)))))
 		(apply #'call-process compile-media-ffmpeg-executable nil nil nil
 					 args)))
 
