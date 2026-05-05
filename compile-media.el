@@ -1286,17 +1286,26 @@ SPECS can specify additional operations, such as:
 										 "-i"
 										 (expand-file-name video))
 							 (and
-								(plist-get specs :crop)
-								(list "-vf"
-											(if (plist-get specs :crop)
-													(cl-destructuring-bind (x1 y1 x2 y2)
-															(plist-get specs :crop)
-														(format "crop=%d:%d:%d:%d"
-																		(- x2 x1)
-																		(- y2 y1)
-																		x1
-																		y1))
-												(error "Unknown spec"))))
+								(or (plist-get specs :crop)
+										(plist-get specs :redact))
+								(list "-filter_complex"
+											(concat
+											 "[0:v]"
+											 (string-join
+												(delq
+												 nil
+												 (list
+													(and (plist-get specs :redact)
+															 (compile-media-format-image-redaction-as-filter (plist-get specs :redact)))
+													(and (plist-get specs :crop)
+															 (cl-destructuring-bind (x1 y1 x2 y2)
+																	 (plist-get specs :crop)
+																 (format "crop=%d:%d:%d:%d,"
+																				 (- x2 x1)
+																				 (- y2 y1)
+																				 x1
+																				 y1)))))
+												","))))
 							 (list
 								"-frames:v"
 								"1"
@@ -1305,6 +1314,58 @@ SPECS can specify additional operations, such as:
 								(expand-file-name output-file)))))
 		(apply #'call-process compile-media-ffmpeg-executable nil nil nil
 					 args)))
+
+(defvar compile-media-redact-color "#777777")
+(defun compile-media-format-image-redaction-as-filter (redaction)
+	"Return the FFMPEG filter for drawing boxes as specified in REDACTION.
+
+REDACTION is a string of the form:
+
+x1 y1 x2 y2, x1 y2 x2 y2, x1 y1 x2 y2, x1 y2 x2 y2"
+	(mapconcat
+	 (lambda (region)
+		 (cl-destructuring-bind (x1 y1 x2 y2)
+				 (mapcar #'string-to-number (split-string region " "))
+			 (format "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s:t=fill"
+							 x1
+							 y1
+							 (- x2 x1)
+							 (- y2 y1)
+							 compile-media-redact-color)))
+	 (split-string redaction "[ \t\n]*,[ \t\n]*")
+	 ","))
+
+(defun compile-media-format-video-redaction-as-filter (redaction)
+	"Return the FFMPEG filter for drawing boxes as specified in REDACTION.
+
+REDACTION is a string of the form:
+
+hh:mm:ss.mmm --> hh:mm:ss.mmm: x1 y1 x2 y2, x1 y2 x2 y2;
+hh:mm:ss.mmm --> hh:mm:ss.mmm: x1 y1 x2 y2, x1 y2 x2 y2"
+	(mapconcat
+	 (lambda (part)
+		 (when (string-match "\\([0-9:\\.]+\\) --> \\([0-9:\\.]+\\): \\(.+\\)" part)
+			 (let* ((start (match-string 1 part))
+							(end (match-string 2 part))
+							(regions (match-string 3 part))
+							(start-secs (- (/ (subed-timestamp-to-msecs start) 1000) (car clip-time)))
+							(end-secs (- (/ (subed-timestamp-to-msecs end) 1000) (car clip-time))))
+				 (mapconcat
+					(lambda (region)
+						(cl-destructuring-bind (x1 y1 x2 y2)
+								(mapcar #'string-to-number (split-string region " "))
+							(format "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s:t=fill:enable='between(t,%.3f,%.3f)'"
+											x1
+											y1
+											(- x2 x1)
+											(- y2 y1)
+											compile-media-redact-color
+											start-secs
+											end-secs)))
+					(split-string regions "[ \t\n]*,[ \t\n]*")
+					","))))
+	 (split-string redaction "[ \t\n]*;[ \t\n]*")
+	 ","))
 
 (provide 'compile-media)
 ;;; compile-media.el ends here
