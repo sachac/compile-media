@@ -1276,7 +1276,7 @@ SPECS can specify additional operations, such as:
 	(when (stringp (plist-get specs :crop))
 		(plist-put specs :crop
 							 (mapcar 'string-to-number
-											 (split-string (plist-get specs :crop) " "))))
+											 (split-string (plist-get specs :crop) " +"))))
 	(let ((args (append
 							 (if (plist-get specs :keyframe)
 									 (list "-skip_frame" "nokey"))
@@ -1325,13 +1325,18 @@ x1 y1 x2 y2, x1 y2 x2 y2, x1 y1 x2 y2, x1 y2 x2 y2"
 	(mapconcat
 	 (lambda (region)
 		 (cl-destructuring-bind (x1 y1 x2 y2)
-				 (mapcar #'string-to-number (split-string region " "))
-			 (format "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s:t=fill"
+				 (mapcar #'string-to-number (split-string region " +"))
+			 (format "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s:t=fill%s"
 							 x1
 							 y1
 							 (- x2 x1)
 							 (- y2 y1)
-							 compile-media-redact-color)))
+							 compile-media-redact-color
+							 (if compile-media--debug
+									 (format ",drawtext=x=%d:y=%d:text=%s"
+													 x1 y1 region)
+								 ""
+								 ))))
 	 (split-string redaction "[ \t\n]*,[ \t\n]*")
 	 ","))
 
