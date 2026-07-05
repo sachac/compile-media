@@ -419,8 +419,7 @@ Returns a plist with :input, :filter, and :output.
       )
     (list :input input-list
           :filter (when filter-list (string-join (reverse filter-list) ";"))
-          :output (when (and (not output) video-track-output)
-                    (list "-map:v" (format "[%s]" video-track-output)))
+          :output (list "-map:v" (format "[%s]" (or output video-track-output)))
           :input-count input-count)))
 
 (defun compile-media--prepare-static-image (info &optional output)
@@ -890,7 +889,7 @@ Return ((audio . list-of-files) (video . list-of-files))."
          (adjusted (compile-media--adjust-subtitles-based-on-intermediate-files sources intermediate))
          (current-time-ms 0)
          (ext (file-name-extension output-file))
-         (visuals (compile-media--format-visuals sources nil (if a-list 1 0)))
+         (visuals (compile-media--format-visuals sources "v" (if a-list 1 0)))
          (codec-args
           (split-string
            (cadr
@@ -923,10 +922,15 @@ Return ((audio . list-of-files) (video . list-of-files))."
     (when compile-media--debug (message "%s" (mapconcat 'shell-quote-argument command " ")))
     (unless compile-media-dry-run
       (when (and adjusted (featurep 'subed))
-      (subed-create-file output-vtt adjusted t))
-    (apply #'call-process
-           (car command)
-             nil (get-buffer-create "*ffmpeg*") nil (append (cdr command) args)))
+				(subed-create-file output-vtt adjusted t))
+			(with-current-buffer (get-buffer-create "*ffmpeg*")
+				(insert "CMD "
+								(car command) " "
+								(mapconcat 'shell-quote-argument (append (cdr command) args) " ")
+								"\n")
+				(apply #'call-process
+							 (car command)
+							 nil (current-buffer) nil (append (cdr command) args))))
     (mapconcat 'shell-quote-argument command " ")))
 
 (defalias 'compile-media 'compile-media-sync)        ; Use the same version for now.
