@@ -1005,7 +1005,21 @@ CHAPTERS is a plist with :start-ms :stop-ms :text."
 						(delete-file chapter-file)))))
     (mapconcat 'shell-quote-argument command " ")))
 
-(defalias 'compile-media 'compile-media-sync)        ; Use the same version for now.
+(defun compile-media (sources output-file &optional callback &rest args)
+	"Compile SOURCES into OUTPUT-FILE asynchronously.
+Pass ARGS to ffmpeg.
+Call CALLBACK when finished."
+	(require 'async)
+	(let ((proc (async-start
+							 `(lambda ()
+									,(async-inject-variables "\\`load-path\\|\\`compile-media")
+									(setq debug-on-error t)
+									(require 'compile-media)
+									(apply #'compile-media-sync ',sources ',output-file ',args))
+							 (or callback
+									 (lambda (_)
+										 (message "compile-media: %s should be done" output-file))))))
+		(message "Starting asynchronous compilation of %s..." output-file)))
 
 (defun compile-media-expand-combined-sources (sources)
   "Expand combined SOURCES into separate audio and video tracks.
@@ -1059,8 +1073,7 @@ This example shows how to overlay something on top of something else. Combined m
                  args)))
     (unless (or compile-media--debug compile-media-dry-run)
       (delete-directory temp-dir t))
-    (when compile-media-dry-run
-      process-result)))
+    process-result))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
