@@ -450,7 +450,7 @@ Returns a plist with :input, :filter, and :output.
            (list "-i" (compile-media-maybe-expand-filename (plist-get info :source)))
            (plist-get info :after-input))
    :filter
-   (format "[%d:v]%s[%s]"
+   (format "[%d:v]%s,format=yuva420p[%s]"
            (plist-get info :index)
              (or (plist-get info :filter) "scale")
            (or output
