@@ -898,23 +898,24 @@ Return ((audio . list-of-files) (video . list-of-files))."
 (defun compile-media--adjust-subtitles-based-on-intermediate-files (sources intermediate)
   (let ((original (plist-get (alist-get 'subtitles sources) :subtitles))
         (msecs 0))
-    (seq-map-indexed
-     (lambda (o i)
-       (let ((file-duration (compile-media-get-file-duration-ms (plist-get o :intermediate)))
-             (caption (elt original i)))
-         (when (= (or file-duration 0) 0)
-           (message "Possible issue with %s %s - zero duration"
-                    (plist-get o :intermediate)
-                    (elt (assoc-default 'audio sources) i)))
-         (prog1 (list
-                 nil
-                 msecs
-                 (+ msecs file-duration)
-                 (elt caption 3)
-                 (unless (string= (elt caption 4) "")
-                   (elt caption 4)))
-           (setq msecs (+ msecs file-duration)))))
-     (alist-get 'audio intermediate))))
+		(when original
+			(seq-map-indexed
+			 (lambda (o i)
+				 (let ((file-duration (compile-media-get-file-duration-ms (plist-get o :intermediate)))
+							 (caption (elt original i)))
+					 (when (= (or file-duration 0) 0)
+						 (message "Possible issue with %s %s - zero duration"
+											(plist-get o :intermediate)
+											(elt (assoc-default 'audio sources) i)))
+					 (prog1 (list
+									 nil
+									 msecs
+									 (+ msecs file-duration)
+									 (elt caption 3)
+									 (unless (string= (elt caption 4) "")
+										 (elt caption 4)))
+						 (setq msecs (+ msecs file-duration)))))
+			 (alist-get 'audio intermediate)))))
 
 (defun compile-media-format-chapters-for-ffmpeg (chapters)
   "Format CHAPTERS in FFmpeg format.
