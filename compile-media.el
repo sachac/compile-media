@@ -327,6 +327,7 @@ Returns a plist with :input, :filter, and :output.
 				 (text-track (assoc-default 'text visual-tracks))
 				 (text-track-file (and text-track (make-temp-file "compile-media" nil ".ass"))))
 		(when text-track
+			(require 'subed-ass)
 			(subed-create-file
 			 text-track-file
 			 (mapcar (lambda (o)
@@ -448,7 +449,7 @@ Returns a plist with :input, :filter, and :output.
            (list "-i" (compile-media-maybe-expand-filename (plist-get info :source)))
            (plist-get info :after-input))
    :filter
-   (format "[%d:v]%s[%s]"
+   (format "[%d:v]%s,format=yuv420p[%s]"
            (plist-get info :index)
              (or (plist-get info :filter) "scale")
            (or output
@@ -548,6 +549,7 @@ Returns a plist with :input, :filter, and :output.
               (delq nil
                     (list
                      (cond
+											;; this should trim it
                       ((plist-get info :same-edits)
                        (format "select='%s',setpts='N/FRAME_RATE/TB'"
                                (compile-media--select-spans
@@ -555,6 +557,7 @@ Returns a plist with :input, :filter, and :output.
                       ((and start-ms stop-ms) (format "select='between(t,%.3f,%.3f)'" start-s stop-s))
                       (start-ms (format "select='gte(t,%.3f)'" start-s))
                       (stop-ms (format "select='lte(t,%.3f)'" stop-s)))
+
                      (cond
                       ((plist-get info :same-edits) "setpts=PTS-STARTPTS")
                       ((and (plist-get info :keep-original-duration)
@@ -567,6 +570,7 @@ Returns a plist with :input, :filter, and :output.
                                (/ (- duration video-duration) 1000.0)))
                       (duration (format "setpts=(PTS-STARTPTS)*%.3f,setpts=PTS-STARTPTS" (/ duration (* 1.0 video-duration))))
                       (t "setpts=PTS-STARTPTS"))
+										 ;; other filters
                      (plist-get info :filter)))
               ",")
              (or output
@@ -706,7 +710,7 @@ If :include is not specified, include it for all the tracks."
 (defvar compile-media--debug nil)
 
 (defun compile-media--format-trim (trims)
-  "Prepare the filter for trimming parts of the audio."
+  "Prepare the filter for trimming parts of the audio or video."
   (concat
    "1"
    (mapconcat
@@ -895,23 +899,24 @@ Return ((audio . list-of-files) (video . list-of-files))."
 (defun compile-media--adjust-subtitles-based-on-intermediate-files (sources intermediate)
   (let ((original (plist-get (alist-get 'subtitles sources) :subtitles))
         (msecs 0))
-    (seq-map-indexed
-     (lambda (o i)
-       (let ((file-duration (compile-media-get-file-duration-ms (plist-get o :intermediate)))
-             (caption (elt original i)))
-         (when (= (or file-duration 0) 0)
-           (message "Possible issue with %s %s - zero duration"
-                    (plist-get o :intermediate)
-                    (elt (assoc-default 'audio sources) i)))
-         (prog1 (list
-                 nil
-                 msecs
-                 (+ msecs file-duration)
-                 (elt caption 3)
-                 (unless (string= (elt caption 4) "")
-                   (elt caption 4)))
-           (setq msecs (+ msecs file-duration)))))
-     (alist-get 'audio intermediate))))
+		(when original
+			(seq-map-indexed
+			 (lambda (o i)
+				 (let ((file-duration (compile-media-get-file-duration-ms (plist-get o :intermediate)))
+							 (caption (elt original i)))
+					 (when (= (or file-duration 0) 0)
+						 (message "Possible issue with %s %s - zero duration"
+											(plist-get o :intermediate)
+											(elt (assoc-default 'audio sources) i)))
+					 (prog1 (list
+									 nil
+									 msecs
+									 (+ msecs file-duration)
+									 (elt caption 3)
+									 (unless (string= (elt caption 4) "")
+										 (elt caption 4)))
+						 (setq msecs (+ msecs file-duration)))))
+			 (alist-get 'audio intermediate)))))
 
 (defun compile-media-format-chapters-for-ffmpeg (chapters)
   "Format CHAPTERS in FFmpeg format.
@@ -1002,7 +1007,21 @@ CHAPTERS is a plist with :start-ms :stop-ms :text."
 						(delete-file chapter-file)))))
     (mapconcat 'shell-quote-argument command " ")))
 
-(defalias 'compile-media 'compile-media-sync)        ; Use the same version for now.
+(defun compile-media (sources output-file &optional callback &rest args)
+	"Compile SOURCES into OUTPUT-FILE asynchronously.
+Pass ARGS to ffmpeg.
+Call CALLBACK when finished."
+	(require 'async)
+	(let ((proc (async-start
+							 `(lambda ()
+									,(async-inject-variables "\\`load-path\\|\\`compile-media")
+									(setq debug-on-error t)
+									(require 'compile-media)
+									(apply #'compile-media-sync ',sources ',output-file ',args))
+							 (or callback
+									 (lambda (_)
+										 (message "compile-media: %s should be done" output-file))))))
+		(message "Starting asynchronous compilation of %s..." output-file)))
 
 (defun compile-media-expand-combined-sources (sources)
   "Expand combined SOURCES into separate audio and video tracks.
@@ -1056,8 +1075,7 @@ This example shows how to overlay something on top of something else. Combined m
                  args)))
     (unless (or compile-media--debug compile-media-dry-run)
       (delete-directory temp-dir t))
-    (when compile-media-dry-run
-      process-result)))
+    process-result))
 
 (defun compile-media--select-spans (current)
   "Return select filter for CURRENT."
