@@ -40,6 +40,13 @@
 ;; :pad-left - silence as a number of milliseconds or (multiple . FACTOR)
 ;;; Code:
 
+(declare-function subed-create-file "subed")
+(autoload 'subed-create-file "subed")
+(autoload 'subed-ass-mode "subed-ass")
+(autoload 'subed-vtt-mode "subed-vtt")
+(require 'cl-macs)
+(eval-when-compile (require 'cl-macs))
+
 (defgroup compile-media nil
   "Functions for combining video or audio files."
   :group 'multimedia)
