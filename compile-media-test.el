@@ -13,6 +13,165 @@
 																			"v")
 		'(:filter "drawtext=fontcolor=white:x=5:y=5:fontsize=40:text=Hello:enable='between(t,0.000,0.100)',drawtext=fontcolor=white:x=5:y=5:fontsize=40:text=world:enable='between(t,0.100,0.200)'[v]"))))
 
+
+(ert-deftest compile-media--format-audio ()
+	"Tests `compile-media--format-audio'."
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1999 :source "test.opus")))
+		'(:input ("-ss" 0.0 "-t" 1.999 "-i" "test.opus") :filter
+						 "[0:a]anull[a]" :input-count 1 :output ("-map:a" "[a]"))))
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset -100)))
+		'(:input
+			("-ss" 0.0 "-t" 0.999 "-i" "test.opus" "-ss" 1.1 "-t" 0.599 "-i"
+			 "test.opus")
+			:filter "[0:a]anull[a0];[1:a]anull[a1];[a0][a1]concat=n=2:v=0:a=1[a]"
+			:input-count 2 :output ("-map:a" "[a]"))))
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset 100)))
+		'(:input
+			("-ss" 0.0 "-t" 0.999 "-i" "test.opus" "-ss" 1.0 "-t" 0.499 "-i"
+			 "test.opus")
+			:filter
+			"[0:a]anull[a0];[1:a]adelay=100:all=1[a1];[a0][a1]concat=n=2:v=0:a=1[a]"
+			:input-count 2 :output ("-map:a" "[a]"))
+		))
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset 100)
+			 (:start-ms 1600 :stop-ms 1699 :source "test.opus")))
+		'(:input
+			("-ss" 0.0 "-t" 0.999 "-i" "test.opus" "-ss" 1.0 "-t" 0.599 "-i"
+			 "test.opus")
+			:filter
+			"[0:a]anull[a0];[1:a]adelay=100:all=1[a1];[a0][a1]concat=n=2:v=0:a=1[a]"
+			:input-count 2 :output ("-map:a" "[a]"))
+		))
+	;; av-offset should be carried forward from previous cues.
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset -100)
+			 (:start-ms 1700 :stop-ms 1799 :source "test.opus")))
+		'(:input
+			("-ss" 0.0 "-t" 0.999 "-i" "test.opus" "-ss" 1.1 "-t" 0.599 "-i"
+			 "test.opus" "-ss" 1.8 "-t" 0.099 "-i" "test.opus")
+			:filter
+			"[0:a]anull[a0];[1:a]anull[a1];[2:a]anull[a2];[a0][a1][a2]concat=n=3:v=0:a=1[a]"
+			:input-count 3 :output ("-map:a" "[a]"))
+
+		))
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset 100)
+			 (:start-ms 1600 :stop-ms 1799 :source "test.opus")))
+		'(:input
+			("-ss" 0.0 "-t" 0.999 "-i" "test.opus" "-ss" 1.0 "-t" 0.699 "-i"
+			 "test.opus")
+			:filter
+			"[0:a]anull[a0];[1:a]adelay=100:all=1[a1];[a0][a1]concat=n=2:v=0:a=1[a]"
+			:input-count 2 :output ("-map:a" "[a]"))))
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset 100)
+			 (:start-ms 1700 :stop-ms 1799 :source "test.opus")))
+		'(:input
+			("-ss" 0.0 "-t" 0.999 "-i" "test.opus"
+			 "-ss" 1.0 "-t" 0.499 "-i" "test.opus"
+			 "-ss" 1.6 "-t" 0.099 "-i" "test.opus")
+			:filter
+			"[0:a]anull[a0];[1:a]adelay=100:all=1[a1];[2:a]anull[a2];[a0][a1][a2]concat=n=3:v=0:a=1[a]"
+			:input-count 3 :output ("-map:a" "[a]"))))
+	;; If I have several positive syncs, they shouldn't add too much
+	(should
+	 (equal
+		(compile-media--format-audio
+		 '((:start-ms 0 :stop-ms 999 :source "test.opus")
+			 (:start-ms 1000 :stop-ms 1599 :source "test.opus" :av-offset 300)
+			 (:start-ms 1700 :stop-ms 2599 :source "test.opus" :av-offset 500)
+			 (:start-ms 5000 :stop-ms 5199 :source "test.opus" :av-offset -100)
+			 (:start-ms 5200 :stop-ms 5399 :source "test.opus" :av-offset -200)))
+		'(:input
+ ("-ss" 0.0 "-t" 0.999 "-i" "test.opus" "-ss" 1.0 "-t" 0.299 "-i"
+	"test.opus" "-ss" 1.3 "-t" 0.799 "-i" "test.opus" "-ss" 5.1 "-t"
+	0.199 "-i" "test.opus" "-ss" 5.4 "-t" 0.199 "-i" "test.opus")
+ :filter
+ "[0:a]anull[a0];[1:a]adelay=300:all=1[a1];[2:a]adelay=100:all=1[a2];[3:a]anull[a3];[4:a]anull[a4];[a0][a1][a2][a3][a4]concat=n=5:v=0:a=1[a]"
+ :input-count 5 :output ("-map:a" "[a]")))))
+
+
+(ert-deftest compile-media--format-open-captions ()
+  "Tests `compile-media--format-open-captions'."
+	(let* ((result (compile-media--format-open-captions
+									'((:start-ms 1 :stop-ms 1000 :x 10 :y 10 :align "top left" :text "Hello world"))
+									"captions"
+									))
+				 (text (with-temp-buffer
+								 (insert-file-contents (car (plist-get result :temp-files)))
+								 (buffer-string))))
+		(should (string-match "\\an" text))
+		(should (string-match "Hello world" text))
+		(should (string-match "subtitles" (plist-get result :filter)))
+		(should (string-match (regexp-quote (car (plist-get result :temp-files)))
+													(plist-get result :filter)))
+		(delete-file (car (plist-get result :temp-files)))))
+
+
+
+(ert-deftest compile-media--combine-times ()
+  "Tests `compile-media--combine-times'."
+  (should (equal (compile-media--combine-times
+									'((:start-ms 1 :stop-ms 999)
+										(:start-ms 1000 :stop-ms 1999)))
+								 '((:start-ms 1 :stop-ms 1999))))
+	(should (equal (compile-media--combine-times
+									'((:start-ms 1000 :stop-ms 2000)
+										(:start-ms 2000 :stop-ms 3000)))
+								 '((:start-ms 1000 :stop-ms 3000))))
+	;; don't combine if we have different offsets
+	(should (equal (compile-media--combine-times
+									'((:start-ms 1000 :stop-ms 1999)
+										(:start-ms 2000 :stop-ms 2999 :av-offset 200)
+										(:start-ms 3000 :stop-ms 3999 :av-offset 300)))
+								 '((:start-ms 1000 :stop-ms 1999)
+									 (:start-ms 2000 :stop-ms 2999 :av-offset 200)
+									 (:start-ms 3000 :stop-ms 3999 :av-offset 300))))
+	;; combine if we have the same offset
+	(should (equal (compile-media--combine-times
+									'((:start-ms 1000 :stop-ms 1999)
+										(:start-ms 2000 :stop-ms 2999 :av-offset 200)
+										(:start-ms 3000 :stop-ms 3999 :av-offset 200)))
+								 '((:start-ms 1000 :stop-ms 1999)
+									 (:start-ms 2000 :stop-ms 3999 :av-offset 200)))))
+
+
+(ert-deftest compile-media-ass-format-tags ()
+  "Tests `compile-media-ass-format-tags'."
+  (should
+	 (equal (compile-media-ass-format-tags
+					 '(:align "center center"))
+					"\\an5"))
+	(should (equal (compile-media-ass-format-tags
+					 '(:font-size 20 :font-family "Arial" :align "center center"))
+					"\\an5")))
+
+
 (ert-deftest compile-media-expand-combined-sources ()
   "Tests `compile-media-expand-combined-sources'."
   (should (equal (compile-media-expand-combined-sources
